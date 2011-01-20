@@ -1,0 +1,29 @@
+---
+abstract: 'colored pretty-print of Perl data structures and objects'
+author:
+  - 'Breno G. de Oliveira <garu@cpan.org>'
+build_requires:
+  Carp: 0
+  Class::MOP: 1.12
+  Exporter: 5.63
+  Object::ID: 0
+  Scalar::Util: 1.23
+  Sort::Naturally: 1.02
+  Term::ANSIColor: 3
+  Test::More: 0
+  parent: 0.224
+configure_requires:
+  Module::Build: 0.36
+generated_by: 'Module::Build version 0.3607'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: Data-Printer
+provides:
+  Data::Printer:
+    file: lib/Data/Printer.pm
+    version: 0.01
+resources:
+  license: http://dev.perl.org/licenses/
+version: 0.01
