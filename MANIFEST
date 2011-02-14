@@ -7,5 +7,8 @@ MANIFEST.SKIP
 META.yml
 README
 t/00-load.t
+t/colors.t
+t/filter.t
+t/local_conf.t
 t/p.t
 t/pod.t

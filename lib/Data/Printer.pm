@@ -2,16 +2,21 @@ package Data::Printer;
 use strict;
 use warnings;
 use Term::ANSIColor;
-use Scalar::Util qw(reftype);
+use Scalar::Util;
 use Sort::Naturally;
 use Class::MOP;
 use Carp qw(croak);
+use Clone qw(clone);
 require Object::ID;
 
-use parent 'Exporter';
-our @EXPORT = qw(p);
-our @EXPORT_OK = qw(d);
-our $VERSION = 0.01;
+our $VERSION = 0.02;
+
+BEGIN {
+    if ($^O =~ /Win32/i) {
+        require Win32::Console::ANSI;
+        Win32::Console::ANSI->import;
+    }
+}
 
 # defaults
 my $properties = {
@@ -22,15 +27,16 @@ my $properties = {
     'multiline'      => 1,
     'deparse'        => 0,
     'hash_separator' => '    ',
-    'color_for'      => {
-        'array'  => 'bright_white',
-        'number' => 'bright_blue',
-        'string' => 'bright_yellow',
-        'class'  => 'bright_green',
-        'undef'  => 'bright_red',
-        'hash'   => 'magenta',
-        'regex'  => 'yellow',
-        'code'   => 'green',
+    'color'          => {
+        'array'    => 'bright_white',
+        'number'   => 'bright_blue',
+        'string'   => 'bright_yellow',
+        'class'    => 'bright_green',
+        'undef'    => 'bright_red',
+        'hash'     => 'magenta',
+        'regex'    => 'yellow',
+        'code'     => 'green',
+        'glob'     => 'bright_cyan',
         'repeated' => 'white on_red',
     },
     'class' => {
@@ -39,31 +45,67 @@ my $properties = {
         internals      => 1,
         show_export    => 1,
     },
-
+    'filters' => {},
 };
 
+
+sub import {
+    my ($class, $args) = @_;
+
+    if (ref $args and ref $args eq 'HASH') {
+        $properties = _init( $args );
+    }
+
+    my $caller = caller;
+    no strict 'refs';
+    *{"$caller\::p"} = \&p;
+}
 
 sub p (\[@$%&];%) {
     my ($item, %local_properties) = @_;
     my $p = _init(\%local_properties);
 
-    print STDERR _p( $item, $p ) . $/;
+    my $out = _p( $item, $p );
+    print STDERR  $out . $/ unless defined wantarray;
+    return $out;
 }
 
-sub d (\[@$%&];%) {
-    my ($item, %local_properties) = @_;
-    my $p = _init(\%local_properties);
-
-    return _p( $item, $p );
-}
 
 sub _init {
-    return {
-        %$properties,            # first we get the global settings
+    my $p = shift;
+    my $clone = clone($properties);
 
-        '_current_indent' => 0,  # used internally
-        '_seen'           => {}, # used internally
-    };
+    if ($p) {
+        foreach my $key (keys %$p) {
+            if ($key eq 'color' or $key eq 'colour') {
+                my $color = $p->{$key};
+                if (defined $color and not $color) {
+                    $clone->{color} = {};
+                }
+                else {
+                    foreach my $target ( keys %{$p->{$key}} ) {
+                        $clone->{color}->{$target} = $p->{$key}->{$target};
+                    }
+                }
+            }
+            elsif ($key eq 'class') {
+                foreach my $item ( keys %{$p->{class}} ) {
+                    $clone->{class}->{$item} = $p->{class}->{$item};
+                }
+            }
+            else {
+                $clone->{$key} = $p->{$key};
+            }
+        }
+    }
+
+    $clone->{'_current_indent'} = 0;  # used internally
+    $clone->{'_seen'} = {};           # used internally
+
+    # colors only if we're not being piped
+    $ENV{ANSI_COLORS_DISABLED} = 1 if not -t *STDERR;
+
+    return $clone;
 }
 
 sub _p {
@@ -74,37 +116,51 @@ sub _p {
 
     # Object's unique ID, avoiding circular structures
     my $id = Object::ID::object_id( $item );
-    return colored($p->{_seen}->{$id}, $p->{color_for}->{repeated}
+    return colored($p->{_seen}->{$id}, $p->{color}->{repeated}
     ) if exists $p->{_seen}->{$id};
 
     $p->{_seen}->{$id} = $p->{name};
 
-    if ($ref eq 'SCALAR') {
+    # filter item (if user set a filter for it)
+    if ( exists $p->{filters}->{$ref} ) {
+        $string .= $p->{filters}->{$ref}->($item);
+    }
+
+    elsif ($ref eq 'SCALAR') {
         if (not defined $$item) {
-            $string .= colored('undef', $p->{color_for}->{'undef'});
+            $string .= colored('undef', $p->{color}->{'undef'});
         }
         elsif (Scalar::Util::looks_like_number($$item)) {
-            $string .= colored($$item, $p->{color_for}->{'number'});
+            $string .= colored($$item, $p->{color}->{'number'});
         }
         else {
-            $string .= colored(qq["$$item"], $p->{color_for}->{'string'});
+            $string .= colored(qq["$$item"], $p->{color}->{'string'});
         }
     }
 
     elsif ($ref eq 'REF') {
-        $string .= '\\ ' . _p($$item, $p);
+        # look-ahead, add a '\' only if it's not an object
+        if (my $ref_ahead = ref $$item ) {
+            $string .= '\\ ' if grep { $_ eq $ref_ahead }
+                qw(SCALAR CODE Regexp ARRAY HASH GLOB REF);
+        }
+        $string .= _p($$item, $p);
     }
 
     elsif ($ref eq 'CODE') {
-        $string .= colored('sub { ... }', $p->{color_for}->{'code'});
+        $string .= colored('sub { ... }', $p->{color}->{'code'});
+    }
+
+    elsif ($ref eq 'GLOB' or "$item" =~ /=GLOB\([^()]+\)$/ ) {
+        $string .= colored("$$item", $p->{color}->{'glob'});
     }
 
     elsif ($ref eq 'Regexp') {
         my $val = "$item";
         # a regex to parse a regex. Talk about full circle :)
-        if ($val =~ m/\(\?([xism]*)(?:\-[xism]+)?:(.*)\)/) {
+        if ($val =~ m/\(\?([xismpogce]*)(?:\-[xismpogce]+)?:(.*)\)/) {
             my ($modifiers, $val) = ($1, $2);
-            $string .= colored($val, $p->{color_for}->{'regex'});
+            $string .= colored($val, $p->{color}->{'regex'});
             if ($modifiers) {
                 $string .= "  (modifiers: $modifiers)";
             }
@@ -124,7 +180,7 @@ sub _p {
             $string .= (' ' x $p->{_current_indent})
                      . colored(
                              sprintf("%-*s", 3 + length($#{$item}), "[$i]"),
-                             $p->{color_for}->{'array'}
+                             $p->{color}->{'array'}
                        );
 
             $ref = ref $array_elem;
@@ -163,7 +219,7 @@ sub _p {
             $string .= (' ' x $p->{_current_indent})
                      . colored(
                              sprintf("%-*s", $len, $key),
-                             $p->{color_for}->{'hash'}
+                             $p->{color}->{'hash'}
                        )
                      . $p->{hash_separator}
                      ;
@@ -197,7 +253,7 @@ sub _class {
 
     my $string = '';
 
-    $string .= colored($ref, $p->{color_for}->{'class'}) . "  {\n";
+    $string .= colored($ref, $p->{color}->{'class'}) . "  {\n";
 
     $p->{_current_indent} += $p->{indent};
 
@@ -205,30 +261,26 @@ sub _class {
 
     $string .= (' ' x $p->{_current_indent})
              . 'Parents       ' 
-             . join(', ', map { colored($_, $p->{color_for}->{'class'}) }
+             . join(', ', map { colored($_, $p->{color}->{'class'}) }
                           $meta->superclasses
                ) . $/;
 
     $string .= (' ' x $p->{_current_indent})
              . 'Linear @ISA   '
-             . join(', ', map { colored( $_, $p->{color_for}->{'class'}) }
+             . join(', ', map { colored( $_, $p->{color}->{'class'}) }
                           $meta->linearized_isa
                ) . $/;
 
 
     $string .= _show_methods($ref, $meta, $p);
 
-    my $realtype = reftype $item;
+    my $realtype = Scalar::Util::reftype $item;
     $string .= (' ' x $p->{_current_indent})
              . 'internals: ';
 
     # Note: we can't do p($$item) directly
     # or we'd fall in a deep recursion trap
-    if ($realtype eq 'SCALAR') {
-        my $realvalue = $$item;
-        $string .= _p(\$realvalue, $p);
-    }
-    elsif ($realtype eq 'HASH') {
+    if ($realtype eq 'HASH') {
         my %realvalue = %$item;
         $string .= _p(\%realvalue, $p);
     }
@@ -240,8 +292,10 @@ sub _class {
         my $realvalue = &$item;
         $string .= _p(\$realvalue, $p);
     }
+    # SCALAR and friends
     else {
-        croak "Type '$realtype' not identified. Please file a bug report for Data::Printer.";
+        my $realvalue = $$item;
+        $string .= _p(\$realvalue, $p);
     }
 
     $p->{_current_indent} -= $p->{indent};
@@ -277,7 +331,7 @@ sub _show_methods {
         $string .= (' ' x $p->{_current_indent})
                  . "$type methods (" . scalar @list . ')'
                  . (@list ? ' : ' : '')
-                 . join(', ', map { colored($_, $p->{color_for}->{class}) }
+                 . join(', ', map { colored($_, $p->{color}->{class}) }
                               @list
                    ) . $/;
     }
@@ -299,7 +353,7 @@ Data::Print - colored pretty-print of Perl data structures and objects
   my @array = qw(a b);
   $array[3] = 'c';
   
-  p(@array);  # no need to pass references!
+  p @array;  # no need to pass references!
 
 Code above will show this (with colored output):
 
@@ -330,12 +384,24 @@ Which might give you something like:
  
 
 If for some reason you want to mangle with the output string instead of
-printing it in STDERR, you can export the 'd' function.
+printing it to STDERR, you can simply ask for a return value:
 
-  use Data::Printer 'd';
+  my $string = p(@some_array);
+  warn p(%some_hash);
 
-  warn d(%some_hash);
+Finally, you can set all options during initialization, including
+coloring, identation and filters!
 
+  use Data::Printer {
+      color => {
+         'regex' => 'blue',
+         'hash'  => 'yellow',
+      },
+      filters => {
+         'DateTime' => sub { $_[0]->ymd },
+         'SCALAR'   => sub { "oh noes, a found a scalar! $_[0]" },
+      },
+  };
 
 =head1 RATIONALE
 
@@ -357,9 +423,58 @@ If you want to serialize/store/restore Perl data structures,
 this module will NOT help you. Try Storable, Data::Dumper,
 JSON, or whatever. CPAN is full of such solutions!
 
-=head1 WARNING - EXTREMELY BETA CODE
+=head1 COLORS
 
-Volatile interface and internals. Use at your own risk :)
+Below are all the available colorizations and their default values.
+Note that both spellings ('color' and 'colour') will work.
+
+   use Data::Printer {
+       color => {
+        array    => 'bright_white',  # array index numbers
+        number   => 'bright_blue',   # numbers
+        string   => 'bright_yellow', # strings
+        class    => 'bright_green',  # class names
+        undef    => 'bright_red',    # the 'undef' value
+        hash     => 'magenta',       # hash keys
+        regex    => 'yellow',        # regular expressions
+        code     => 'green',         # code references
+        glob     => 'bright_cyan',   # globs (usually file handles)
+        repeated => 'white on_red',  # references to seen values
+       },
+   };
+
+=head1 FILTERS
+
+Data::Printer offers you the ability to use filters to override
+any kind of data display. The filters are placed on a hash,
+where the keys are the types or class names, and the values
+are anonymous subs that receive the item itself as a parameter.
+This lets you quickly override the way Data::Printer handles
+and displays data types and, in particular, objects.
+
+  use Data::Printer {
+        filters => {
+            'DateTime'      => sub { $_[0]->ymd },
+            'HTTP::Request' => sub { $_[0]->uri },
+        },
+  };
+
+Perl types are named as C<ref> calls them: I<SCALAR>, I<ARRAY>,
+I<HASH>, I<REF>, I<CODE>, I<Regexp> and I<GLOB>. As for objects,
+just use the object's name, as shown above.
+
+
+=head1 EXPERIMENTAL FEATURES
+
+The following are volatile parts of the API which are subject to
+change at any given version. Use them at your own risk.
+
+=head2 Local Configuration (experimental!)
+
+You can override global configurations by writing them as the second
+parameter for p(). For example:
+
+  p( %var, color => { hash => 'green' } );
 
 =head1 CAVEATS
 
@@ -373,8 +488,8 @@ You are supposed to pass variables, not anonymous structures:
 
    p( { foo => 'bar' } ); # wrong
 
-   p( %somehash );        # right
-   p( $hash_ref );        # also right
+   p %somehash;        # right
+   p $hash_ref;        # also right
 
 
 =head1 BUGS
