@@ -6,7 +6,7 @@ build_requires:
   Test::More: 0
 configure_requires:
   Module::Build: 0.36
-generated_by: 'Module::Build version 0.3624'
+generated_by: 'Module::Build version 0.3603'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -15,7 +15,7 @@ name: Data-Printer
 provides:
   Data::Printer:
     file: lib/Data/Printer.pm
-    version: 0.03
+    version: 0.04
 requires:
   Carp: 0
   Class::MOP: 1.12
@@ -26,4 +26,4 @@ requires:
   Term::ANSIColor: 3
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.03
+version: 0.04
