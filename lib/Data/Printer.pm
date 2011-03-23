@@ -8,8 +8,10 @@ use Class::MOP;
 use Carp qw(croak);
 use Clone qw(clone);
 require Object::ID;
+use File::Spec;
+use File::HomeDir ();
 
-our $VERSION = 0.04;
+our $VERSION = 0.05;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -52,13 +54,42 @@ my $properties = {
 sub import {
     my ($class, $args) = @_;
 
+    # the RC file overrides the defaults
+    my $file = File::Spec->catfile(
+        File::HomeDir->my_home,
+        '.dataprinter'
+    );
+    if (-e $file) {
+        if ( open my $fh, '<', $file ) {
+            my $rc_data;
+            { local $/; $rc_data = <$fh> }
+            close $fh;
+
+            my $config = eval $rc_data;
+            if ( $@ ) {
+                warn "Error loading $file: $@\n";
+            }
+            elsif (!ref $config or ref $config ne 'HASH') {
+                warn "Error loading $file: config file must return a hash reference\n";
+            }
+            else {
+                $properties = _init( $config );
+            }
+        }
+        else {
+            warn "error opening '$file': $!\n";
+        }
+    }
+
+    # and 'use' arguments override the RC file
     if (ref $args and ref $args eq 'HASH') {
         $properties = _init( $args );
     }
 
+    my $imported_method = $properties->{alias} || 'p';
     my $caller = caller;
     no strict 'refs';
-    *{"$caller\::p"} = \&p;
+    *{"$caller\::$imported_method"} = \&p;
 }
 
 sub p (\[@$%&];%) {
@@ -345,7 +376,7 @@ __END__
 
 =head1 NAME
 
-Data::Print - colored pretty-print of Perl data structures and objects
+Data::Printer - colored pretty-print of Perl data structures and objects
 
 =head1 SYNOPSIS
 
@@ -400,9 +431,14 @@ coloring, identation and filters!
       },
       filters => {
          'DateTime' => sub { $_[0]->ymd },
-         'SCALAR'   => sub { "oh noes, a found a scalar! $_[0]" },
+         'SCALAR'   => sub { "oh noes, I found a scalar! $_[0]" },
       },
   };
+
+And if you like your setup better than the defaults, just put them in
+a '.dataprinter' file in your home dir and don't repeat yourself
+ever again :)
+
 
 =head1 RATIONALE
 
@@ -430,7 +466,7 @@ Below are all the available colorizations and their default values.
 Note that both spellings ('color' and 'colour') will work.
 
    use Data::Printer {
-       color => {
+     color => {
         array    => 'bright_white',  # array index numbers
         number   => 'bright_blue',   # numbers
         string   => 'bright_yellow', # strings
@@ -441,7 +477,7 @@ Note that both spellings ('color' and 'colour') will work.
         code     => 'green',         # code references
         glob     => 'bright_cyan',   # globs (usually file handles)
         repeated => 'white on_red',  # references to seen values
-       },
+     },
    };
 
 =head1 FILTERS
@@ -463,6 +499,64 @@ and displays data types and, in particular, objects.
 Perl types are named as C<ref> calls them: I<SCALAR>, I<ARRAY>,
 I<HASH>, I<REF>, I<CODE>, I<Regexp> and I<GLOB>. As for objects,
 just use the object's name, as shown above.
+
+=head1 ALIASING
+
+Data::Printer provides the nice, short, C<p()> function to dump your
+data structures and objects. In case you rather use a more explicit
+name, already have a C<p()> function (why?) in your code and want
+to avoid clashing, or are just used to other function names for that
+purpose, you can easily rename it:
+
+  use Data::Printer { alias => 'Dumper' };
+
+  Dumper( %foo );
+
+
+=head1 CONFIGURATION FILE (RUN CONTROL)
+
+Data::Printer tries to let you easily customize as much as possible
+regarding the visualization of your data structures and objects.
+But we don't want you to keep repeating yourself every time you
+want to use it!
+
+To avoid this, you can simply create a file called C<.dataprinter> in
+your home directory (usually C</home/username> in Linux), and put
+your configuration hash reference in there.
+
+This way, instead of doing something like:
+
+   use Data::Printer {
+     colour => {
+        array => 'bright_blue',
+     },
+     filters => {
+         'Catalyst::Request' => sub {
+             my $req = shift;
+             return "Cookies: " . p($req->cookies)
+         },
+     },
+   };
+
+You can create a .dataprinter file like this:
+
+   {
+     colour => {
+        array => 'bright_blue',
+     },
+     filters => {
+         'Catalyst::Request' => sub {
+             my $req = shift;
+             return "Cookies: " . p($req->cookies)
+         },
+     },
+   };
+
+and from then on all you have to do while debugging scripts is:
+
+  use Data::Printer;
+
+and it will load your custom settings every time :)
 
 
 =head1 EXPERIMENTAL FEATURES

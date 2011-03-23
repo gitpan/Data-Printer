@@ -4,11 +4,15 @@ lib/Data/Printer.pm
 Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
+META.json
 META.yml
 README
 t/00-load.t
+t/alias.t
 t/colors.t
 t/filter.t
 t/local_conf.t
 t/p.t
 t/pod.t
+t/rc_file.t
+t/rc_file2.t

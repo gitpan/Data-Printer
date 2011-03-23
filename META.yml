@@ -5,8 +5,9 @@ author:
 build_requires:
   Test::More: 0
 configure_requires:
-  Module::Build: 0.36
-generated_by: 'Module::Build version 0.3603'
+  Module::Build: 0.38
+dynamic_config: 1
+generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110580'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -15,15 +16,17 @@ name: Data-Printer
 provides:
   Data::Printer:
     file: lib/Data/Printer.pm
-    version: 0.04
+    version: 0.05
 requires:
   Carp: 0
   Class::MOP: 1.12
   Clone: 0.31
+  File::HomeDir: 0
+  File::Spec: 0
   Object::ID: 0
   Scalar::Util: 1.23
   Sort::Naturally: 1.02
   Term::ANSIColor: 3
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.04
+version: 0.05
