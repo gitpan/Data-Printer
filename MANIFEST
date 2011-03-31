@@ -9,6 +9,7 @@ META.yml
 README
 t/00-load.t
 t/alias.t
+t/aliased_with_filter.t
 t/colors.t
 t/filter.t
 t/local_conf.t

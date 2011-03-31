@@ -16,7 +16,7 @@ name: Data-Printer
 provides:
   Data::Printer:
     file: lib/Data/Printer.pm
-    version: 0.05
+    version: 0.06
 requires:
   Carp: 0
   Class::MOP: 1.12
@@ -29,4 +29,4 @@ requires:
   Term::ANSIColor: 3
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.05
+version: 0.06
