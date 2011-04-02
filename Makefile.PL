@@ -8,7 +8,7 @@ WriteMakefile
                    'Carp' => 0,
                    'Class::MOP' => '1.12',
                    'Clone' => '0.31',
-                   'File::HomeDir' => 0,
+                   'File::HomeDir' => '0.91',
                    'File::Spec' => 0,
                    'Object::ID' => 0,
                    'Scalar::Util' => '1.23',
