@@ -14,7 +14,7 @@ WriteMakefile
                    'Scalar::Util' => '1.23',
                    'Sort::Naturally' => '1.02',
                    'Term::ANSIColor' => '3',
-                   'Test::More' => 0
+                   'Test::More' => '0.88'
                  },
   'INSTALLDIRS' => 'site',
   'EXE_FILES' => [],

@@ -11,7 +11,7 @@ require Object::ID;
 use File::Spec;
 use File::HomeDir ();
 
-our $VERSION = 0.07;
+our $VERSION = 0.08;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -194,7 +194,7 @@ sub _p {
         my $val = "$item";
         # a regex to parse a regex. Talk about full circle :)
         # note: we are not validating anything, just grabbing modifiers
-        if ($val =~ m/\(\?\^?([uladxismpogce]*)(?:\-[uladxismpogce]+)?:(.*)\)/) {
+        if ($val =~ m/\(\?\^?([uladxismpogce]*)(?:\-[uladxismpogce]+)?:(.*)\)/s) {
             my ($modifiers, $val) = ($1, $2);
             $string .= colored($val, $p->{color}->{'regex'});
             if ($modifiers) {
