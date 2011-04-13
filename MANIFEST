@@ -13,6 +13,8 @@ t/aliased_with_filter.t
 t/colors.t
 t/filter.t
 t/local_conf.t
+t/obj.t
+t/obj2.t
 t/p.t
 t/pod.t
 t/rc_file.t

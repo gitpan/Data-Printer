@@ -11,7 +11,7 @@ require Object::ID;
 use File::Spec;
 use File::HomeDir ();
 
-our $VERSION = 0.08;
+our $VERSION = 0.09;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -305,33 +305,35 @@ sub _class {
              . 'Linear @ISA   '
              . join(', ', map { colored( $_, $p->{color}->{'class'}) }
                           $meta->linearized_isa
-               ) . $/;
+               );
 
 
     $string .= _show_methods($ref, $meta, $p);
 
-    my $realtype = Scalar::Util::reftype $item;
-    $string .= (' ' x $p->{_current_indent})
-             . 'internals: ';
+    if ( $p->{'class'}->{'internals'} ) {
+        my $realtype = Scalar::Util::reftype $item;
+        $string .= $/ . (' ' x $p->{_current_indent})
+                 . 'internals: ';
 
-    # Note: we can't do p($$item) directly
-    # or we'd fall in a deep recursion trap
-    if ($realtype eq 'HASH') {
-        my %realvalue = %$item;
-        $string .= _p(\%realvalue, $p);
-    }
-    elsif ($realtype eq 'ARRAY') {
-        my @realvalue = @$item;
-        $string .= _p(\@realvalue, $p);
-    }
-    elsif ($realtype eq 'CODE') {
-        my $realvalue = &$item;
-        $string .= _p(\$realvalue, $p);
-    }
-    # SCALAR and friends
-    else {
-        my $realvalue = $$item;
-        $string .= _p(\$realvalue, $p);
+        # Note: we can't do p($$item) directly
+        # or we'd fall in a deep recursion trap
+        if ($realtype eq 'HASH') {
+            my %realvalue = %$item;
+            $string .= _p(\%realvalue, $p);
+        }
+        elsif ($realtype eq 'ARRAY') {
+            my @realvalue = @$item;
+            $string .= _p(\@realvalue, $p);
+        }
+        elsif ($realtype eq 'CODE') {
+            my $realvalue = &$item;
+            $string .= _p(\$realvalue, $p);
+        }
+        # SCALAR and friends
+        else {
+            my $realvalue = $$item;
+            $string .= _p(\$realvalue, $p);
+        }
     }
 
     $p->{_current_indent} -= $p->{indent};
@@ -364,12 +366,12 @@ sub _show_methods {
     foreach my $type (qw(public private)) {
         my @list = nsort @{ $methods->{$type} };
 
-        $string .= (' ' x $p->{_current_indent})
+        $string .= $/ . (' ' x $p->{_current_indent})
                  . "$type methods (" . scalar @list . ')'
                  . (@list ? ' : ' : '')
                  . join(', ', map { colored($_, $p->{color}->{class}) }
                               @list
-                   ) . $/;
+                   );
     }
 
     return $string;
@@ -521,6 +523,23 @@ purpose, you can easily rename it:
 
   Dumper( %foo );
 
+
+=head1 CUSTOMIZATION
+
+I tried to provide sane defaults for Data::Printer, so you'll never have
+to worry about anything other than typing C<< "p( $var )" >> in your code.
+That said, and besides coloring and filtering, there are several other
+customization options available, as shown below (with default values):
+
+  use Data::Printer {
+      name           => 'var',   # name to display on cyclic references
+      indent         => 4,       # how many spaces in each indent
+      hash_separator => '    ',  # what separates keys from values
+
+      class => {
+          internals => 1,        # show internal data structures of classes
+      },
+  };
 
 =head1 CONFIGURATION FILE (RUN CONTROL)
 
