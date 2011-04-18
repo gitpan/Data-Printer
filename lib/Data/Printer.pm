@@ -11,7 +11,7 @@ require Object::ID;
 use File::Spec;
 use File::HomeDir ();
 
-our $VERSION = 0.09;
+our $VERSION = 0.10;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -28,7 +28,7 @@ my $properties = {
     'max_depth'      => 0,
     'multiline'      => 1,
     'deparse'        => 0,
-    'hash_separator' => '    ',
+    'hash_separator' => '   ',
     'color'          => {
         'array'    => 'bright_white',
         'number'   => 'bright_blue',
@@ -42,14 +42,15 @@ my $properties = {
         'repeated' => 'white on_red',
     },
     'class' => {
-        show_inherited => 'all',   # also 0, 'none', 'public' or 'private'
-        expand         => 'first', # also 1, 'all', 'none', 0
-        internals      => 1,
-        show_export    => 1,
+        inherited => 'none',   # also 0, 'none', 'public' or 'private'
+        expand    => 1,        # how many levels to expand. 0 for none, 'all' for all
+        internals => 1,
+        export    => 1,
     },
     'filters' => {},
 };
 
+my $BREAK = "\n";
 
 sub import {
     my ($class, $args) = @_;
@@ -99,6 +100,11 @@ sub p (\[@$%&];%) {
     my ($item, %local_properties) = @_;
 
     my $p = _init(\%local_properties);
+    unless ($p->{multiline}) {
+        $BREAK = ' ';
+        $p->{'indent'} = 0;
+        $p->{'index'}  = 0;
+    }
 
     my $out = color('reset') . _p( $item, $p );
     print STDERR  $out . $/ unless defined wantarray;
@@ -136,6 +142,8 @@ sub _init {
 
     $clone->{'_current_indent'} = 0;  # used internally
     $clone->{'_seen'} = {};           # used internally
+    $clone->{'_depth'} = 0;           # used internally
+    $clone->{'class'}{'_depth'} = 0;  # used internally
 
     # colors only if we're not being piped
     $ENV{ANSI_COLORS_DISABLED} = 1 if not -t *STDERR;
@@ -161,6 +169,8 @@ sub _p {
         $string .= $p->{filters}->{$ref}->($item);
     }
 
+    # TODO: Might be a good idea to set the rest of this sub
+    # inside the filter dispatch table.
     elsif ($ref eq 'SCALAR') {
         if (not defined $$item) {
             $string .= colored('undef', $p->{color}->{'undef'});
@@ -183,7 +193,11 @@ sub _p {
     }
 
     elsif ($ref eq 'CODE') {
-        $string .= colored('sub { ... }', $p->{color}->{'code'});
+        my $code = 'sub { ... }';
+        if ($p->{deparse}) {
+            $code = _deparse( $item, $p );
+        }
+        $string .= colored($code, $p->{color}->{'code'});
     }
 
     elsif ($ref eq 'GLOB' or "$item" =~ /=GLOB\([^()]+\)$/ ) {
@@ -207,75 +221,97 @@ sub _p {
     }
 
     elsif ($ref eq 'ARRAY') {
-        $string .= "[\n";
-        $p->{_current_indent} += $p->{indent};
-        foreach my $i (0 .. $#{$item} ) {
-            $p->{name} .= "[$i]";
+        $p->{_depth}++;
 
-            my $array_elem = $item->[$i];
-            $string .= (' ' x $p->{_current_indent})
-                     . colored(
-                             sprintf("%-*s", 3 + length($#{$item}), "[$i]"),
-                             $p->{color}->{'array'}
-                       );
-
-            $ref = ref $array_elem;
-
-            # scalar references should be re-referenced
-            # to gain a '\' sign in front of them
-            if (!$ref or $ref eq 'SCALAR') {
-                $string .= _p( \$array_elem, $p );
-            }
-            else {
-                $string .= _p( $array_elem, $p );
-            }
-            $string .= ",\n";
-            my $size = 2 + length($i); # [10], [100], etc
-            substr $p->{name}, -$size, $size, '';
+        if ( $p->{max_depth} and $p->{_depth} > $p->{max_depth} ) {
+            $string .= '[ ... ]';
         }
-        $p->{_current_indent} -= $p->{indent};
-        $string .= (' ' x $p->{_current_indent}) . "]";
+        else {
+            $string .= "[$BREAK";
+            $p->{_current_indent} += $p->{indent};
+
+            foreach my $i (0 .. $#{$item} ) {
+                $p->{name} .= "[$i]";
+
+                my $array_elem = $item->[$i];
+                $string .= (' ' x $p->{_current_indent});
+                if ($p->{'index'}) {
+                    $string .= colored(
+                                 sprintf("%-*s", 3 + length($#{$item}), "[$i]"),
+                                 $p->{color}->{'array'}
+                           );
+                }
+
+                $ref = ref $array_elem;
+
+                # scalar references should be re-referenced
+                # to gain a '\' sign in front of them
+                if (!$ref or $ref eq 'SCALAR') {
+                    $string .= _p( \$array_elem, $p );
+                }
+                else {
+                    $string .= _p( $array_elem, $p );
+                }
+                $string .= ($i == $#{$item} ? '' : ',') . $BREAK;
+                my $size = 2 + length($i); # [10], [100], etc
+                substr $p->{name}, -$size, $size, '';
+            }
+            $p->{_current_indent} -= $p->{indent};
+            $string .= (' ' x $p->{_current_indent}) . "]";
+        }
+        $p->{_depth}--;
     }
 
     elsif ($ref eq 'HASH') {
-        $string .= "{\n";
-        $p->{_current_indent} += $p->{indent};
+        $p->{_depth}++;
 
-        # length of the largest key is used for indenting
-        my $len = 0;
-        foreach (keys %$item) {
-            my $l = length;
-            $len = $l if $l > $len;
+        if ( $p->{max_depth} and $p->{_depth} > $p->{max_depth} ) {
+            $string .= '{ ... }';
         }
+        else {
+            $string .= "{$BREAK";
+            $p->{_current_indent} += $p->{indent};
 
-        foreach my $key (nsort keys %$item) {
-            $p->{name} .= "{$key}";
-            my $element = $item->{$key};
-
-            $string .= (' ' x $p->{_current_indent})
-                     . colored(
-                             sprintf("%-*s", $len, $key),
-                             $p->{color}->{'hash'}
-                       )
-                     . $p->{hash_separator}
-                     ;
-
-            $ref = ref $element;
-            # scalar references should be re-referenced
-            # to gain a '\' sign in front of them
-            if (!$ref or $ref eq 'SCALAR') {
-                $string .= _p( \$element, $p );
+            # length of the largest key is used for indenting
+            my $len = 0;
+            if ($p->{multiline}) {
+                foreach (keys %$item) {
+                    my $l = length;
+                    $len = $l if $l > $len;
+                }
             }
-            else {
-                $string .= _p( $element, $p );
-            }
-            $string .= ",\n";
 
-            my $size = 2 + length($key); # {foo}, {z}, etc
-            substr $p->{name}, -$size, $size, '';
+            my $total_keys = scalar keys %$item;
+            foreach my $key (nsort keys %$item) {
+                $p->{name} .= "{$key}";
+                my $element = $item->{$key};
+
+                $string .= (' ' x $p->{_current_indent})
+                         . colored(
+                                 sprintf("%-*s", $len, $key),
+                                 $p->{color}->{'hash'}
+                           )
+                         . $p->{hash_separator}
+                         ;
+
+                $ref = ref $element;
+                # scalar references should be re-referenced
+                # to gain a '\' sign in front of them
+                if (!$ref or $ref eq 'SCALAR') {
+                    $string .= _p( \$element, $p );
+                }
+                else {
+                    $string .= _p( $element, $p );
+                }
+                $string .= (--$total_keys == 0 ? '' : ',') . $BREAK;
+
+                my $size = 2 + length($key); # {foo}, {z}, etc
+                substr $p->{name}, -$size, $size, '';
+            }
+            $p->{_current_indent} -= $p->{indent};
+            $string .= (' ' x $p->{_current_indent}) . "}";
         }
-        $p->{_current_indent} -= $p->{indent};
-        $string .= (' ' x $p->{_current_indent}) . "}";
+        $p->{_depth}--;
     }
     else {
         $string .= _class($ref, $item, $p);
@@ -284,60 +320,82 @@ sub _p {
     return $string;
 }
 
+sub _deparse {
+    my ($item, $p) = @_;
+    require B::Deparse;
+    my $i = $p->{indent};
+    my $deparseopts = ["-sCi${i}v'Useless const omitted'"];
+
+    my $sub = 'sub ' . B::Deparse->new($deparseopts)->coderef2text($item);
+    my $pad = "\n" . (' ' x ($p->{_current_indent} + $i));
+    $sub    =~ s/\n/$pad/gse;
+    return $sub;
+}
+
 sub _class {
     my ($ref, $item, $p) = @_;
 
     my $string = '';
+    $p->{class}{_depth}++;
 
-    $string .= colored($ref, $p->{color}->{'class'}) . "  {\n";
+    $string .= colored($ref, $p->{color}->{'class'});
 
-    $p->{_current_indent} += $p->{indent};
+    if ($p->{class}{expand} eq 'all'
+        or $p->{class}{expand} >= $p->{class}{_depth}
+    ) {
+        $string .= "  {$BREAK";
 
-    my $meta = Class::MOP::Class->initialize($ref);
+        $p->{_current_indent} += $p->{indent};
 
-    $string .= (' ' x $p->{_current_indent})
-             . 'Parents       ' 
-             . join(', ', map { colored($_, $p->{color}->{'class'}) }
-                          $meta->superclasses
-               ) . $/;
+        my $meta = Class::MOP::Class->initialize($ref);
 
-    $string .= (' ' x $p->{_current_indent})
-             . 'Linear @ISA   '
-             . join(', ', map { colored( $_, $p->{color}->{'class'}) }
-                          $meta->linearized_isa
-               );
+        if ( my @superclasses = $meta->superclasses ) {
+            $string .= (' ' x $p->{_current_indent})
+                    . 'Parents       '
+                    . join(', ', map { colored($_, $p->{color}->{'class'}) }
+                                 @superclasses
+                    ) . $BREAK;
 
-
-    $string .= _show_methods($ref, $meta, $p);
-
-    if ( $p->{'class'}->{'internals'} ) {
-        my $realtype = Scalar::Util::reftype $item;
-        $string .= $/ . (' ' x $p->{_current_indent})
-                 . 'internals: ';
-
-        # Note: we can't do p($$item) directly
-        # or we'd fall in a deep recursion trap
-        if ($realtype eq 'HASH') {
-            my %realvalue = %$item;
-            $string .= _p(\%realvalue, $p);
+            $string .= (' ' x $p->{_current_indent})
+                    . 'Linear @ISA   '
+                    . join(', ', map { colored( $_, $p->{color}->{'class'}) }
+                              $meta->linearized_isa
+                    ) . $BREAK;
         }
-        elsif ($realtype eq 'ARRAY') {
-            my @realvalue = @$item;
-            $string .= _p(\@realvalue, $p);
+
+        $string .= _show_methods($ref, $meta, $p);
+
+        if ( $p->{'class'}->{'internals'} ) {
+            my $realtype = Scalar::Util::reftype $item;
+            $string .= (' ' x $p->{_current_indent})
+                    . 'internals: ';
+
+            # Note: we can't do p($$item) directly
+            # or we'd fall in a deep recursion trap
+            if ($realtype eq 'HASH') {
+                my %realvalue = %$item;
+                $string .= _p(\%realvalue, $p);
+            }
+            elsif ($realtype eq 'ARRAY') {
+                my @realvalue = @$item;
+                $string .= _p(\@realvalue, $p);
+            }
+            elsif ($realtype eq 'CODE') {
+                my $realvalue = &$item;
+                $string .= _p(\$realvalue, $p);
+            }
+            # SCALAR and friends
+            else {
+                my $realvalue = $$item;
+                $string .= _p(\$realvalue, $p);
+            }
+            $string .= $BREAK;
         }
-        elsif ($realtype eq 'CODE') {
-            my $realvalue = &$item;
-            $string .= _p(\$realvalue, $p);
-        }
-        # SCALAR and friends
-        else {
-            my $realvalue = $$item;
-            $string .= _p(\$realvalue, $p);
-        }
+
+        $p->{_current_indent} -= $p->{indent};
+        $string .= (' ' x $p->{_current_indent}) . "}";
     }
-
-    $p->{_current_indent} -= $p->{indent};
-    $string .= $/ . (' ' x $p->{_current_indent}) . "}";
+    $p->{class}{_depth}--;
 
     return $string;
 }
@@ -350,28 +408,32 @@ sub _show_methods {
         public => [],
         private => [],
     };
+    my $inherited = $p->{class}{inherited} || 'none';
+
+METHOD:
     foreach my $method ($meta->get_all_methods) {
         my $method_string = $method->name;
+        my $type = substr($method_string, 0, 1) eq '_' ? 'private' : 'public';
 
         if ($method->package_name ne $ref) {
-            next; #FIXME :)
+            next METHOD unless $inherited ne 'none'
+                           and ($inherited eq 'all' or $type eq $inherited);
             $method_string .= ' (' . $method->package_name . ')';
         }
 
-        my $type = substr($method->name, 0, 1) eq '_' ? 'private' : 'public';
-            push @{ $methods->{$type} }, $method_string;
+        push @{ $methods->{$type} }, $method_string;
     }
 
     # render our string doing a natural sort by method name
     foreach my $type (qw(public private)) {
         my @list = nsort @{ $methods->{$type} };
 
-        $string .= $/ . (' ' x $p->{_current_indent})
+        $string .= (' ' x $p->{_current_indent})
                  . "$type methods (" . scalar @list . ')'
                  . (@list ? ' : ' : '')
                  . join(', ', map { colored($_, $p->{color}->{class}) }
                               @list
-                   );
+                   ) . $BREAK;
     }
 
     return $string;
@@ -534,12 +596,27 @@ customization options available, as shown below (with default values):
   use Data::Printer {
       name           => 'var',   # name to display on cyclic references
       indent         => 4,       # how many spaces in each indent
-      hash_separator => '    ',  # what separates keys from values
+      hash_separator => '   ',   # what separates keys from values
+      index          => 1,       # display array indices
+      multiline      => 1,       # display in multiple lines (see note below)
+      max_depth      => 0,       # how deep to traverse the data (0 for all)
+      deparse        => 0,       # use B::Deparse to expand subrefs
 
       class => {
           internals => 1,        # show internal data structures of classes
+
+          inherited => 'none',   # show inherited methods,
+                                 # can also be 'all', 'private', or 'public'.
+
+          expand    => 1,        # how deep to traverse the object (in case
+                                 # it contains other objects). Defaults to
+                                 # 1, meaning expand only itself. Can be any
+                                 # number, 0 for no class expansion, and 'all'
+                                 # to expand everything.
       },
   };
+
+Note: setting C<multiline> to 0 will also set C<index> and C<indent> to 0.
 
 =head1 CONFIGURATION FILE (RUN CONTROL)
 

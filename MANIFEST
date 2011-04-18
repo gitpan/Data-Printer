@@ -11,8 +11,11 @@ t/00-load.t
 t/alias.t
 t/aliased_with_filter.t
 t/colors.t
+t/conf.t
+t/deparse.t
 t/filter.t
 t/local_conf.t
+t/multiline.t
 t/obj.t
 t/obj2.t
 t/p.t
