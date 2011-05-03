@@ -11,7 +11,7 @@ require Object::ID;
 use File::Spec;
 use File::HomeDir ();
 
-our $VERSION = 0.10;
+our $VERSION = 0.11;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -27,6 +27,7 @@ my $properties = {
     'index'          => 1,
     'max_depth'      => 0,
     'multiline'      => 1,
+    'sort_keys'      => 1,
     'deparse'        => 0,
     'hash_separator' => '   ',
     'color'          => {
@@ -42,10 +43,11 @@ my $properties = {
         'repeated' => 'white on_red',
     },
     'class' => {
-        inherited => 'none',   # also 0, 'none', 'public' or 'private'
-        expand    => 1,        # how many levels to expand. 0 for none, 'all' for all
-        internals => 1,
-        export    => 1,
+        inherited    => 'none',   # also 0, 'none', 'public' or 'private'
+        expand       => 1,        # how many levels to expand. 0 for none, 'all' for all
+        internals    => 1,
+        export       => 1,
+        sort_methods => 1,
     },
     'filters' => {},
 };
@@ -53,53 +55,64 @@ my $properties = {
 my $BREAK = "\n";
 
 sub import {
-    my ($class, $args) = @_;
+    my $class = shift;
+    my $args;
+    if (scalar @_) {
+        $args = @_ == 1 ? shift : {@_};
+    }
 
-    # the RC file overrides the defaults
-    my $file = File::Spec->catfile(
-        File::HomeDir->my_home,
-        '.dataprinter'
-    );
-    if (-e $file) {
-        if ( open my $fh, '<', $file ) {
-            my $rc_data;
-            { local $/; $rc_data = <$fh> }
-            close $fh;
+    # the RC file overrides the defaults,
+    # (and we load it only once)
+    unless( exists $properties->{_initialized} ) {
+        my $file = File::Spec->catfile(
+            File::HomeDir->my_home,
+            '.dataprinter'
+        );
+        if (-e $file) {
+            if ( open my $fh, '<', $file ) {
+                my $rc_data;
+                { local $/; $rc_data = <$fh> }
+                close $fh;
 
-            my $config = eval $rc_data;
-            if ( $@ ) {
-                warn "Error loading $file: $@\n";
-            }
-            elsif (!ref $config or ref $config ne 'HASH') {
-                warn "Error loading $file: config file must return a hash reference\n";
+                my $config = eval $rc_data;
+                if ( $@ ) {
+                    warn "Error loading $file: $@\n";
+                }
+                elsif (!ref $config or ref $config ne 'HASH') {
+                    warn "Error loading $file: config file must return a hash reference\n";
+                }
+                else {
+                    $properties = _merge( $config );
+                }
             }
             else {
-                $properties = _init( $config );
+                warn "error opening '$file': $!\n";
             }
         }
-        else {
-            warn "error opening '$file': $!\n";
-        }
+        $properties->{_initialized} = 1;
     }
 
     # and 'use' arguments override the RC file
     if (ref $args and ref $args eq 'HASH') {
-        $properties = _init( $args );
+        $properties = _merge( $args );
     }
 
     my $imported_method = $properties->{alias} || 'p';
     my $caller = caller;
     no strict 'refs';
     *{"$caller\::$imported_method"} = \&p;
+
+    # colors only if we're not being piped
+    $ENV{ANSI_COLORS_DISABLED} = 1 if not -t *STDERR;
 }
 
 sub p (\[@$%&];%) {
-    croak 'If you call p() inside a filter, please pass arguments as references'
+    croak 'When calling p() inside inline filters, please pass arguments as references'
         unless ref $_[0];
 
     my ($item, %local_properties) = @_;
 
-    my $p = _init(\%local_properties);
+    my $p = _merge(\%local_properties);
     unless ($p->{multiline}) {
         $BREAK = ' ';
         $p->{'indent'} = 0;
@@ -112,9 +125,9 @@ sub p (\[@$%&];%) {
 }
 
 
-sub _init {
+sub _merge {
     my $p = shift;
-    my $clone = clone($properties);
+    my $clone = clone $properties;
 
     if ($p) {
         foreach my $key (keys %$p) {
@@ -134,6 +147,32 @@ sub _init {
                     $clone->{class}->{$item} = $p->{class}->{$item};
                 }
             }
+            elsif ($key eq 'filters') {
+                my $val = $p->{$key};
+
+                foreach my $item (keys %$val) {
+
+                    # EXPERIMENTAL: filters in modules
+                    if ($item eq 'external') {
+                        foreach my $class ( @{$val->{$item}} ) {
+                            my $module = "Data::Printer::Filter::$class";
+                            eval "use $module";
+                            if ($@) {
+                                warn "Error loading filter '$module': $@";
+                            }
+                            else {
+                                my %from_module = %{$module->_filter_list};
+                                foreach my $k (keys %from_module) {
+                                    $clone->{filters}->{$k} = $from_module{$k};
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        $clone->{filters}->{$item} = $val->{$item};
+                    }
+                }
+            }
             else {
                 $clone->{$key} = $p->{$key};
             }
@@ -141,12 +180,10 @@ sub _init {
     }
 
     $clone->{'_current_indent'} = 0;  # used internally
+    $clone->{'_linebreak'} = \$BREAK; # used internally
     $clone->{'_seen'} = {};           # used internally
     $clone->{'_depth'} = 0;           # used internally
     $clone->{'class'}{'_depth'} = 0;  # used internally
-
-    # colors only if we're not being piped
-    $ENV{ANSI_COLORS_DISABLED} = 1 if not -t *STDERR;
 
     return $clone;
 }
@@ -166,7 +203,7 @@ sub _p {
 
     # filter item (if user set a filter for it)
     if ( exists $p->{filters}->{$ref} ) {
-        $string .= $p->{filters}->{$ref}->($item);
+        $string .= $p->{filters}->{$ref}->($item, $p);
     }
 
     # TODO: Might be a good idea to set the rest of this sub
@@ -282,7 +319,8 @@ sub _p {
             }
 
             my $total_keys = scalar keys %$item;
-            foreach my $key (nsort keys %$item) {
+            my @keys = ($p->{sort_keys} ? nsort keys %$item : keys %$item );
+            foreach my $key (@keys) {
                 $p->{name} .= "{$key}";
                 my $element = $item->{$key};
 
@@ -426,7 +464,7 @@ METHOD:
 
     # render our string doing a natural sort by method name
     foreach my $type (qw(public private)) {
-        my @list = nsort @{ $methods->{$type} };
+        my @list = ($p->{class}{sort_methods} ? nsort @{$methods->{$type}} : @{$methods->{$type}});
 
         $string .= (' ' x $p->{_current_indent})
                  . "$type methods (" . scalar @list . ')'
@@ -486,8 +524,15 @@ Which might give you something like:
 If for some reason you want to mangle with the output string instead of
 printing it to STDERR, you can simply ask for a return value:
 
+  # move to a string
   my $string = p(@some_array);
-  warn p(%some_hash);
+
+  # output to STDOUT instead of STDERR
+  print p(%some_hash);
+
+  # or even render as HTML
+  use HTML::FromANSI;
+  ansi2html( p($object) );
 
 Finally, you can set all options during initialization, including
 coloring, identation and filters!
@@ -502,6 +547,11 @@ coloring, identation and filters!
          'SCALAR'   => sub { "oh noes, I found a scalar! $_[0]" },
       },
   };
+
+You can ommit the first {} block and just initialize it with a
+regular hash:
+
+  use Data::Printer  deparse => 1, sort_keys => 0;
 
 And if you like your setup better than the defaults, just put them in
 a '.dataprinter' file in your home dir and don't repeat yourself
@@ -552,10 +602,12 @@ Note that both spellings ('color' and 'colour') will work.
 
 Data::Printer offers you the ability to use filters to override
 any kind of data display. The filters are placed on a hash,
-where the keys are the types or class names, and the values
-are anonymous subs that receive the item itself as a parameter.
-This lets you quickly override the way Data::Printer handles
-and displays data types and, in particular, objects.
+where keys are the types - or class names - and values
+are anonymous subs that receive two arguments: the item itself
+as first parameter, and the properties hashref (in case your
+filter wants to read from it). This lets you quickly override
+the way Data::Printer handles and displays data types and, in
+particular, objects.
 
   use Data::Printer {
         filters => {
@@ -566,11 +618,16 @@ and displays data types and, in particular, objects.
 
 Perl types are named as C<ref> calls them: I<SCALAR>, I<ARRAY>,
 I<HASH>, I<REF>, I<CODE>, I<Regexp> and I<GLOB>. As for objects,
-just use the object's name, as shown above.
+just use the class' name, as shown above.
 
-B<Note>: If you plan on calling C<p()> from I<within> a filter,
-please make sure you are passing only REFERENCES as arguments.
-See L</CAVEATS> below.
+B<Note>: If you plan on calling C<p()> from I<within> an inline
+filter, please make sure you are passing only REFERENCES as
+arguments. See L</CAVEATS> below.
+
+You may also like to specify standalone filter modules. Please
+see L<Data::Printer::Filter> for further information on this,
+including useful filters that are shipped as part of this
+distribution.
 
 
 =head1 ALIASING
@@ -600,6 +657,7 @@ customization options available, as shown below (with default values):
       index          => 1,       # display array indices
       multiline      => 1,       # display in multiple lines (see note below)
       max_depth      => 0,       # how deep to traverse the data (0 for all)
+      sort_keys      => 1,       # sort hash keys
       deparse        => 0,       # use B::Deparse to expand subrefs
 
       class => {
@@ -613,10 +671,12 @@ customization options available, as shown below (with default values):
                                  # 1, meaning expand only itself. Can be any
                                  # number, 0 for no class expansion, and 'all'
                                  # to expand everything.
+
+          sort_methods => 1      # sort public and private methods
       },
   };
 
-Note: setting C<multiline> to 0 will also set C<index> and C<indent> to 0.
+Note: setting C<multiline> to C<0> will also set C<index> and C<indent> to C<0>.
 
 =head1 CONFIGURATION FILE (RUN CONTROL)
 
@@ -676,6 +736,13 @@ parameter for p(). For example:
 
   p( %var, color => { hash => 'green' } );
 
+
+=head2 Filter classes
+
+As of Data::Printer 0.11, you can create complex filters as a separate
+module. Those can even be uploaded to CPAN and used by other people!
+See L<Data::Printer::Filter> for further information.
+
 =head1 CAVEATS
 
 You can't pass more than one variable at a time.
@@ -692,8 +759,9 @@ You are supposed to pass variables, not anonymous structures:
    p $hash_ref;        # also right
 
 
-If you are using filters, and calling p() (or whatever name you aliased it to)
-from inside those filters, you B<must> pass the arguments to C<p()> as a reference:
+If you are using inline filters, and calling p() (or whatever name you
+aliased it to) from inside those filters, you B<must> pass the arguments
+to C<p()> as a reference:
 
   use Data::Printer {
       filters => {
@@ -708,13 +776,15 @@ from inside those filters, you B<must> pass the arguments to C<p()> as a referen
       },
   };
 
-This happens because your filter is compiled I<before> Data::Printer itself loads,
-so the filter does not see the function prototype. If you forget to pass a reference,
-Data::Printer will generate an exception for you with the following message:
+This happens because your filter function is compiled I<before> Data::Printer
+itself loads, so the filter does not see the function prototype. As a way
+to avoid unpleasant surprises, if you forget to pass a reference, Data::Printer
+will generate an exception for you with the following message:
 
     'If you call p() inside a filter, please pass arguments as references'
 
-
+Another way to avoid this is to use the much more complete L<Data::Printer::Filter>
+interface for standalone filters.
 
 =head1 BUGS
 

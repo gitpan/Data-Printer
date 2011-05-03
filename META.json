@@ -4,7 +4,7 @@
       "Breno G. de Oliveira <garu@cpan.org>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.110910",
+   "generated_by" : "Module::Build version 0.38, CPAN::Meta::Converter version 2.110440",
    "license" : [
       "perl_5"
    ],
@@ -41,7 +41,19 @@
    "provides" : {
       "Data::Printer" : {
          "file" : "lib/Data/Printer.pm",
-         "version" : "0.1"
+         "version" : "0.11"
+      },
+      "Data::Printer::Filter" : {
+         "file" : "lib/Data/Printer/Filter.pm",
+         "version" : 0
+      },
+      "Data::Printer::Filter::DB" : {
+         "file" : "lib/Data/Printer/Filter/DB.pm",
+         "version" : 0
+      },
+      "Data::Printer::Filter::DateTime" : {
+         "file" : "lib/Data/Printer/Filter/DateTime.pm",
+         "version" : 0
       }
    },
    "release_status" : "stable",
@@ -50,5 +62,5 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "0.1"
+   "version" : "0.11"
 }

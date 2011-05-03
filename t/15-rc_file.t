@@ -29,24 +29,26 @@ BEGIN {
     # file created and in place, let's load up our
     # module and see if it overrides the default conf
     # with our .dataprinter RC file
-    use_ok ('Data::Printer', {
-                color => {
-                    hash => 'blue'
-                },
-                hash_separator => '  *  ',
-           });
+    use_ok ('Data::Printer');
+    unlink $file or fail('error removing test file');
 };
 
 my %hash = ( key => 'value' );
+
+is( p(%hash), color('reset') . "{$/    "
+              . colored('key', 'red')
+              . '  +  '
+              . colored('"value"', 'bright_yellow')
+              . "$/}"
+   , 'hash keys are now red'
+);
 
 is( p(%hash, color => { hash => 'blue' }, hash_separator => '  *  ' ), color('reset') . "{$/    "
               . colored('key', 'blue')
               . '  *  '
               . colored('"value"', 'bright_yellow')
               . "$/}"
-, 'global configuration overrides our rc file');
+, 'local configuration overrides our rc file');
 
-
-unlink $file or fail('error removing test file');
 
 done_testing;
