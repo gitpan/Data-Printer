@@ -10,8 +10,9 @@ use Clone qw(clone);
 require Object::ID;
 use File::Spec;
 use File::HomeDir ();
+use Fcntl;
 
-our $VERSION = 0.12;
+our $VERSION = 0.13;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -30,6 +31,8 @@ my $properties = {
     'sort_keys'      => 1,
     'deparse'        => 0,
     'hash_separator' => '   ',
+    'show_tied'      => 1,
+    'class_method'   => undef,        # use a specific dump method, if available
     'color'          => {
         'array'    => 'bright_white',
         'number'   => 'bright_blue',
@@ -153,7 +156,7 @@ sub _merge {
                 foreach my $item (keys %$val) {
 
                     # EXPERIMENTAL: filters in modules
-                    if ($item eq 'external') {
+                    if ($item eq '-external') {
                         foreach my $class ( @{$val->{$item}} ) {
                             my $module = "Data::Printer::Filter::$class";
                             eval "use $module";
@@ -163,13 +166,13 @@ sub _merge {
                             else {
                                 my %from_module = %{$module->_filter_list};
                                 foreach my $k (keys %from_module) {
-                                    $clone->{filters}->{$k} = $from_module{$k};
+                                    push @{ $clone->{filters}->{$k} }, @{ $from_module{$k} };
                                 }
                             }
                         }
                     }
                     else {
-                        $clone->{filters}->{$item} = $val->{$item};
+                        push @{ $clone->{filters}->{$item} }, $val->{$item};
                     }
                 }
             }
@@ -191,6 +194,7 @@ sub _merge {
 sub _p {
     my ($item, $p) = @_;
     my $ref = ref $item;
+    my $tie;
 
     my $string = '';
 
@@ -203,7 +207,12 @@ sub _p {
 
     # filter item (if user set a filter for it)
     if ( exists $p->{filters}->{$ref} ) {
-        $string .= $p->{filters}->{$ref}->($item, $p);
+        foreach my $filter ( @{ $p->{filters}->{$ref} } ) {
+            if ( my $result = $filter->($item, $p) ) {
+                $string .= $result;
+                last;
+            }
+        }
     }
 
     # TODO: Might be a good idea to set the rest of this sub
@@ -218,6 +227,8 @@ sub _p {
         else {
             $string .= colored(qq["$$item"], $p->{color}->{'string'});
         }
+
+        $tie = ref tied $$item;
     }
 
     elsif ($ref eq 'REF') {
@@ -239,6 +250,36 @@ sub _p {
 
     elsif ($ref eq 'GLOB' or "$item" =~ /=GLOB\([^()]+\)$/ ) {
         $string .= colored("$$item", $p->{color}->{'glob'});
+
+        my $extra = '';
+        if (my $flags = fcntl($$item, F_GETFL, 0) ) {
+
+            $extra .= $flags & O_WRONLY ? 'write-only'
+                    : $flags & O_RDWR   ? 'read/write'
+                    : 'read-only'
+                    ;
+
+            my %flags = (
+                    'append'      => O_APPEND,
+                    'async'       => O_ASYNC,
+                    'create'      => O_CREAT,
+                    'truncate'    => O_TRUNC,
+                    'nonblocking' => O_NONBLOCK,
+            );
+
+            if (my @flags = grep { $flags & $flags{$_} } keys %flags) {
+                $extra .= ", flags: @flags";
+            }
+            $extra .= ', ';
+        }
+        my @layers = ();
+        eval { @layers = PerlIO::get_layers $$item };
+        unless ($@) {
+            $extra .= "layers: @layers";
+        }
+        $string .= "  ($extra)" if $extra;
+
+        $tie = ref tied *$$item;
     }
 
     elsif ($ref eq 'Regexp') {
@@ -296,6 +337,8 @@ sub _p {
             $p->{_current_indent} -= $p->{indent};
             $string .= (' ' x $p->{_current_indent}) . "]";
         }
+
+        $tie = ref tied @$item;
         $p->{_depth}--;
     }
 
@@ -349,10 +392,27 @@ sub _p {
             $p->{_current_indent} -= $p->{indent};
             $string .= (' ' x $p->{_current_indent}) . "}";
         }
+
+        $tie = ref tied %$item;
         $p->{_depth}--;
     }
     else {
-        $string .= _class($ref, $item, $p);
+        # let '-class' filters have a go
+        my $visited = 0;
+        if ( exists $p->{filters}->{'-class'} ) {
+            foreach my $filter ( @{ $p->{filters}->{'-class'} } ) {
+                if ( my $result = $filter->($item, $p) ) {
+                    $string .= $result;
+                    $visited = 1;
+                    last;
+                }
+            }
+        }
+        $string .= _class($ref, $item, $p) unless $visited;
+    }
+
+    if ($p->{show_tied} and $tie) {
+        $string .= " (tied to $tie)";
     }
 
     return $string;
@@ -372,6 +432,12 @@ sub _deparse {
 
 sub _class {
     my ($ref, $item, $p) = @_;
+
+    # if the user specified a method to use instead, we do that
+    if ( $p->{class_method} and $item->can($p->{class_method}) ) {
+        my $method = $p->{class_method};
+        return $item->$method;
+    }
 
     my $string = '';
     $p->{class}{_depth}++;
@@ -486,7 +552,7 @@ Data::Printer - colored pretty-print of Perl data structures and objects
 
 =head1 SYNOPSIS
 
-  use Data::Printer;
+  use Data::Printer;   # or just "use DDP" for short
 
   my @array = qw(a b);
   $array[3] = 'c';
@@ -549,7 +615,7 @@ coloring, identation and filters!
   };
 
 You can ommit the first {} block and just initialize it with a
-regular hash:
+regular hash, if it makes things easier to read:
 
   use Data::Printer  deparse => 1, sort_keys => 0;
 
@@ -575,8 +641,8 @@ I<< display Perl variables and objects on screen, properly
 formatted >> (to be inspected by a human)
 
 If you want to serialize/store/restore Perl data structures,
-this module will NOT help you. Try Storable, Data::Dumper,
-JSON, or whatever. CPAN is full of such solutions!
+this module will NOT help you. Try L<Storable>, L<Data::Dumper>,
+L<JSON>, or whatever. CPAN is full of such solutions!
 
 =head1 COLORS
 
@@ -609,25 +675,26 @@ filter wants to read from it). This lets you quickly override
 the way Data::Printer handles and displays data types and, in
 particular, objects.
 
-  use Data::Printer {
-        filters => {
+  use Data::Printer filters => {
             'DateTime'      => sub { $_[0]->ymd },
             'HTTP::Request' => sub { $_[0]->uri },
-        },
   };
 
 Perl types are named as C<ref> calls them: I<SCALAR>, I<ARRAY>,
 I<HASH>, I<REF>, I<CODE>, I<Regexp> and I<GLOB>. As for objects,
 just use the class' name, as shown above.
 
+As of version 0.13, you may also use the '-class' filter, which
+will be called for all non-perl types (objects).
+
 B<Note>: If you plan on calling C<p()> from I<within> an inline
 filter, please make sure you are passing only REFERENCES as
 arguments. See L</CAVEATS> below.
 
 You may also like to specify standalone filter modules. Please
-see L<Data::Printer::Filter> for further information on this,
-including useful filters that are shipped as part of this
-distribution.
+see L<Data::Printer::Filter> for further information on a more
+powerful filter interface for Data::Printer, including useful
+filters that are shipped as part of this distribution.
 
 
 =head1 ALIASING
@@ -638,7 +705,7 @@ name, already have a C<p()> function (why?) in your code and want
 to avoid clashing, or are just used to other function names for that
 purpose, you can easily rename it:
 
-  use Data::Printer { alias => 'Dumper' };
+  use Data::Printer alias => 'Dumper';
 
   Dumper( %foo );
 
@@ -659,6 +726,9 @@ customization options available, as shown below (with default values):
       max_depth      => 0,       # how deep to traverse the data (0 for all)
       sort_keys      => 1,       # sort hash keys
       deparse        => 0,       # use B::Deparse to expand subrefs
+      show_tied      => 1,       # expose tied() variables
+      class_method   => undef,   # if available in the target object, use
+                                 # this method instead to dump it
 
       class => {
           internals => 1,        # show internal data structures of classes
@@ -722,6 +792,17 @@ and from then on all you have to do while debugging scripts is:
   use Data::Printer;
 
 and it will load your custom settings every time :)
+
+
+=head1 THE "DDP" PACKAGE ALIAS
+
+You're likely to add/remove Data::Printer from source code being
+developed and debugged all the time, and typing it might feel too
+long. Because of this the 'DDP' package is provided as a shorter
+alias to Data::Printer:
+
+   use DDP;
+   p %some_var;
 
 
 =head1 EXPERIMENTAL FEATURES
@@ -801,7 +882,37 @@ L<Data::Dumper::Concise>
 
 L<Data::Dump::Streamer>
 
+L<Data::PrettyPrintObjects>
+
 L<Data::TreeDumper>
+
+
+=head1 AUTHOR
+
+Breno G. de Oliveira C<< <garu at cpan.org> >>
+
+=head1 CONTRIBUTORS
+
+Many thanks to everyone that helped design and develop this module, in
+one way or the other. They are (alphabetically):
+
+=over 4
+
+=item * brian d foy
+
+=item * Chris Prather (perigrin)
+
+=item * Eden Cardim (edenc)
+
+=item * Kartik Thakore (kthakore)
+
+=item * Kip Hampton (ubu)
+
+=item * Torsten Raudssus (Getty)
+
+=back
+
+If I missed your name, please drop me a line!
 
 
 =head1 LICENSE AND COPYRIGHT

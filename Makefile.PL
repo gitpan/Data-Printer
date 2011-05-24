@@ -2,22 +2,23 @@
 use ExtUtils::MakeMaker;
 WriteMakefile
 (
-  'PL_FILES' => {},
-  'INSTALLDIRS' => 'site',
   'NAME' => 'Data::Printer',
-  'EXE_FILES' => [],
   'VERSION_FROM' => 'lib/Data/Printer.pm',
   'PREREQ_PM' => {
-                   'Scalar::Util' => '1.23',
-                   'Object::ID' => 0,
-                   'Term::ANSIColor' => '3',
-                   'File::HomeDir' => '0.91',
-                   'Class::MOP' => '1.12',
-                   'File::Spec' => 0,
                    'Carp' => 0,
-                   'Test::More' => '0.88',
+                   'Class::MOP' => '1.12',
+                   'Clone' => '0.31',
+                   'Fcntl' => 0,
+                   'File::HomeDir' => '0.91',
+                   'File::Spec' => 0,
+                   'Object::ID' => 0,
+                   'Scalar::Util' => '1.23',
                    'Sort::Naturally' => '1.02',
-                   'Clone' => '0.31'
-                 }
+                   'Term::ANSIColor' => '3',
+                   'Test::More' => '0.88'
+                 },
+  'INSTALLDIRS' => 'site',
+  'EXE_FILES' => [],
+  'PL_FILES' => {}
 )
 ;

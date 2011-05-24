@@ -7,16 +7,19 @@ build_requires:
 configure_requires:
   Module::Build: 0.38
 dynamic_config: 1
-generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110440'
+generated_by: 'Module::Build version 0.38, CPAN::Meta::Converter version 2.110930'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
   version: 1.4
 name: Data-Printer
 provides:
+  DDP:
+    file: lib/DDP.pm
+    version: 0
   Data::Printer:
     file: lib/Data/Printer.pm
-    version: 0.12
+    version: 0.13
   Data::Printer::Filter:
     file: lib/Data/Printer/Filter.pm
     version: 0
@@ -30,6 +33,7 @@ requires:
   Carp: 0
   Class::MOP: 1.12
   Clone: 0.31
+  Fcntl: 0
   File::HomeDir: 0.91
   File::Spec: 0
   Object::ID: 0
@@ -38,4 +42,4 @@ requires:
   Term::ANSIColor: 3
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.12
+version: 0.13
