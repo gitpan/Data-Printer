@@ -19,7 +19,7 @@ provides:
     version: 0
   Data::Printer:
     file: lib/Data/Printer.pm
-    version: 0.13
+    version: 0.14
   Data::Printer::Filter:
     file: lib/Data/Printer/Filter.pm
     version: 0
@@ -42,4 +42,5 @@ requires:
   Term::ANSIColor: 3
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.13
+  repository: http://github.com/garu/Data-Printer/
+version: 0.14

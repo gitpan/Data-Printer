@@ -12,7 +12,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.13;
+our $VERSION = 0.14;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -32,18 +32,22 @@ my $properties = {
     'deparse'        => 0,
     'hash_separator' => '   ',
     'show_tied'      => 1,
-    'class_method'   => undef,        # use a specific dump method, if available
+    'colored'        => 'auto',       # also 0 or 1
+    'caller_info'    => 0,
+    'caller_message' => 'Printing in line __LINE__ of __FILENAME__:',
+    'class_method'   => '_data_printer', # use a specific dump method, if available
     'color'          => {
-        'array'    => 'bright_white',
-        'number'   => 'bright_blue',
-        'string'   => 'bright_yellow',
-        'class'    => 'bright_green',
-        'undef'    => 'bright_red',
-        'hash'     => 'magenta',
-        'regex'    => 'yellow',
-        'code'     => 'green',
-        'glob'     => 'bright_cyan',
-        'repeated' => 'white on_red',
+        'array'       => 'bright_white',
+        'number'      => 'bright_blue',
+        'string'      => 'bright_yellow',
+        'class'       => 'bright_green',
+        'undef'       => 'bright_red',
+        'hash'        => 'magenta',
+        'regex'       => 'yellow',
+        'code'        => 'green',
+        'glob'        => 'bright_cyan',
+        'repeated'    => 'white on_red',
+        'caller_info' => 'bright_cyan'
     },
     'class' => {
         inherited    => 'none',   # also 0, 'none', 'public' or 'private'
@@ -105,8 +109,6 @@ sub import {
     no strict 'refs';
     *{"$caller\::$imported_method"} = \&p;
 
-    # colors only if we're not being piped
-    $ENV{ANSI_COLORS_DISABLED} = 1 if not -t *STDERR;
 }
 
 sub p (\[@$%&];%) {
@@ -122,9 +124,37 @@ sub p (\[@$%&];%) {
         $p->{'index'}  = 0;
     }
 
-    my $out = color('reset') . _p( $item, $p );
+    # colors only if we're not being piped
+    if ( !$p->{colored} or ($p->{colored} eq 'auto' and not -t *STDERR) ) {
+        $ENV{ANSI_COLORS_DISABLED} = 1;
+    }
+    else {
+        delete $ENV{ANSI_COLORS_DISABLED};
+    }
+
+    my $out = color('reset');
+
+    if ( $p->{caller_info} and $p->{_depth} == 0 ) {
+        $out .= _get_info_message($p);
+    }
+
+    $out .= _p( $item, $p );
     print STDERR  $out . $/ unless defined wantarray;
     return $out;
+}
+
+
+sub _get_info_message {
+    my $p = shift;
+    my @caller = caller 1;
+
+    my $message = $p->{caller_message};
+
+    $message =~ s/\b__PACKAGE__\b/$caller[0]/g;
+    $message =~ s/\b__FILENAME__\b/$caller[1]/g;
+    $message =~ s/\b__LINE__\b/$caller[2]/g;
+
+    return colored($message, $p->{color}{caller_info}) . $BREAK;
 }
 
 
@@ -252,26 +282,32 @@ sub _p {
         $string .= colored("$$item", $p->{color}->{'glob'});
 
         my $extra = '';
-        if (my $flags = fcntl($$item, F_GETFL, 0) ) {
 
-            $extra .= $flags & O_WRONLY ? 'write-only'
-                    : $flags & O_RDWR   ? 'read/write'
-                    : 'read-only'
-                    ;
+        # unfortunately, some systems (like Win32) do not
+        # implement some of these flags (maybe not even
+        # fcntl() itself, so we must wrap it.
+        eval {
+            if (my $flags = fcntl($$item, F_GETFL, 0) ) {
 
-            my %flags = (
-                    'append'      => O_APPEND,
-                    'async'       => O_ASYNC,
-                    'create'      => O_CREAT,
-                    'truncate'    => O_TRUNC,
-                    'nonblocking' => O_NONBLOCK,
-            );
+                $extra .= $flags & O_WRONLY ? 'write-only'
+                        : $flags & O_RDWR   ? 'read/write'
+                        : 'read-only'
+                        ;
 
-            if (my @flags = grep { $flags & $flags{$_} } keys %flags) {
-                $extra .= ", flags: @flags";
+                my %flags = (
+                        'append'      => O_APPEND,
+                        'async'       => O_ASYNC,
+                        'create'      => O_CREAT,
+                        'truncate'    => O_TRUNC,
+                        'nonblocking' => O_NONBLOCK,
+                );
+
+                if (my @flags = grep { $flags & $flags{$_} } keys %flags) {
+                    $extra .= ", flags: @flags";
+                }
+                $extra .= ', ';
             }
-            $extra .= ', ';
-        }
+        };
         my @layers = ();
         eval { @layers = PerlIO::get_layers $$item };
         unless ($@) {
@@ -620,7 +656,7 @@ regular hash, if it makes things easier to read:
   use Data::Printer  deparse => 1, sort_keys => 0;
 
 And if you like your setup better than the defaults, just put them in
-a '.dataprinter' file in your home dir and don't repeat yourself
+a 'C<.dataprinter>' file in your home dir and don't repeat yourself
 ever again :)
 
 
@@ -651,18 +687,81 @@ Note that both spellings ('color' and 'colour') will work.
 
    use Data::Printer {
      color => {
-        array    => 'bright_white',  # array index numbers
-        number   => 'bright_blue',   # numbers
-        string   => 'bright_yellow', # strings
-        class    => 'bright_green',  # class names
-        undef    => 'bright_red',    # the 'undef' value
-        hash     => 'magenta',       # hash keys
-        regex    => 'yellow',        # regular expressions
-        code     => 'green',         # code references
-        glob     => 'bright_cyan',   # globs (usually file handles)
-        repeated => 'white on_red',  # references to seen values
+        array       => 'bright_white',  # array index numbers
+        number      => 'bright_blue',   # numbers
+        string      => 'bright_yellow', # strings
+        class       => 'bright_green',  # class names
+        undef       => 'bright_red',    # the 'undef' value
+        hash        => 'magenta',       # hash keys
+        regex       => 'yellow',        # regular expressions
+        code        => 'green',         # code references
+        glob        => 'bright_cyan',   # globs (usually file handles)
+        repeated    => 'white on_red',  # references to seen values
+        caller_info => 'bright_cyan' # details on what's being printed
      },
    };
+
+Don't fancy colors? Disable them with:
+
+  use Data::Printer colored => 0;
+
+Remember to put your preferred settings in the C<.dataprinter> file
+so you never have to type them at all!
+
+
+=head1 ALIASING
+
+Data::Printer provides the nice, short, C<p()> function to dump your
+data structures and objects. In case you rather use a more explicit
+name, already have a C<p()> function (why?) in your code and want
+to avoid clashing, or are just used to other function names for that
+purpose, you can easily rename it:
+
+  use Data::Printer alias => 'Dumper';
+
+  Dumper( %foo );
+
+
+=head1 CUSTOMIZATION
+
+I tried to provide sane defaults for Data::Printer, so you'll never have
+to worry about anything other than typing C<< "p( $var )" >> in your code.
+That said, and besides coloring and filtering, there are several other
+customization options available, as shown below (with default values):
+
+  use Data::Printer {
+      name           => 'var',   # name to display on cyclic references
+      indent         => 4,       # how many spaces in each indent
+      hash_separator => '   ',   # what separates keys from values
+      index          => 1,       # display array indices
+      multiline      => 1,       # display in multiple lines (see note below)
+      max_depth      => 0,       # how deep to traverse the data (0 for all)
+      sort_keys      => 1,       # sort hash keys
+      deparse        => 0,       # use B::Deparse to expand subrefs
+      show_tied      => 1,       # expose tied() variables
+      caller_info    => 0,       # include information on what's being printed
+
+      class_method   => '_data_printer', # make classes aware of Data::Printer
+                                         # and able to dump themselves.
+
+      class => {
+          internals => 1,        # show internal data structures of classes
+
+          inherited => 'none',   # show inherited methods,
+                                 # can also be 'all', 'private', or 'public'.
+
+          expand    => 1,        # how deep to traverse the object (in case
+                                 # it contains other objects). Defaults to
+                                 # 1, meaning expand only itself. Can be any
+                                 # number, 0 for no class expansion, and 'all'
+                                 # to expand everything.
+
+          sort_methods => 1      # sort public and private methods
+      },
+  };
+
+Note: setting C<multiline> to C<0> will also set C<index> and C<indent> to C<0>.
+
 
 =head1 FILTERS
 
@@ -696,57 +795,43 @@ see L<Data::Printer::Filter> for further information on a more
 powerful filter interface for Data::Printer, including useful
 filters that are shipped as part of this distribution.
 
+=head1 MAKING YOUR CLASSES DDP-AWARE (WITHOUT ADDING ANY DEPS)
 
-=head1 ALIASING
+Whenever printing the contents of a class, Data::Printer first
+checks to see if that class implements a sub called '_data_printer'
+(or whatever you set the "class_method" option to in your settings,
+see L</CUSTOMIZATION> below).
 
-Data::Printer provides the nice, short, C<p()> function to dump your
-data structures and objects. In case you rather use a more explicit
-name, already have a C<p()> function (why?) in your code and want
-to avoid clashing, or are just used to other function names for that
-purpose, you can easily rename it:
+If a sub with that exact name is available in the target object,
+Data::Printer will use it to get the string to print instead of
+making a regular class dump.
 
-  use Data::Printer alias => 'Dumper';
+This means you could have the following in one of your classes:
 
-  Dumper( %foo );
+  sub _data_printer {
+      my ($self, $properties) = @_;
+      return 'Hey, no peeking! But foo contains ' . $self->foo;
+  }
 
+Notice you don't have to depend on Data::Printer at all, just
+write your sub and it will use that to pretty-print your objects.
 
-=head1 CUSTOMIZATION
+If you want to use colors and filter helpers, and still not
+add Data::Printer to your dependencies, remember you can import
+them during runtime:
 
-I tried to provide sane defaults for Data::Printer, so you'll never have
-to worry about anything other than typing C<< "p( $var )" >> in your code.
-That said, and besides coloring and filtering, there are several other
-customization options available, as shown below (with default values):
+  sub _data_printer {
+      require Data::Printer::Filter;
+      Data::Printer::Filter->import;
 
-  use Data::Printer {
-      name           => 'var',   # name to display on cyclic references
-      indent         => 4,       # how many spaces in each indent
-      hash_separator => '   ',   # what separates keys from values
-      index          => 1,       # display array indices
-      multiline      => 1,       # display in multiple lines (see note below)
-      max_depth      => 0,       # how deep to traverse the data (0 for all)
-      sort_keys      => 1,       # sort hash keys
-      deparse        => 0,       # use B::Deparse to expand subrefs
-      show_tied      => 1,       # expose tied() variables
-      class_method   => undef,   # if available in the target object, use
-                                 # this method instead to dump it
+      # now we have 'indent', outdent', 'linebreak', 'p' and 'colored'
+      my ($self, $properties) = @_;
+      ...
+  }
 
-      class => {
-          internals => 1,        # show internal data structures of classes
+Having a filter for that particular class will of course override
+this setting.
 
-          inherited => 'none',   # show inherited methods,
-                                 # can also be 'all', 'private', or 'public'.
-
-          expand    => 1,        # how deep to traverse the object (in case
-                                 # it contains other objects). Defaults to
-                                 # 1, meaning expand only itself. Can be any
-                                 # number, 0 for no class expansion, and 'all'
-                                 # to expand everything.
-
-          sort_methods => 1      # sort public and private methods
-      },
-  };
-
-Note: setting C<multiline> to C<0> will also set C<index> and C<indent> to C<0>.
 
 =head1 CONFIGURATION FILE (RUN CONTROL)
 
@@ -803,6 +888,35 @@ alias to Data::Printer:
 
    use DDP;
    p %some_var;
+
+=head1 CALLER INFORMATION
+
+If you set caller_info to a true value, Data::Printer will prepend
+every call with an informational message. For example:
+
+  use Data::Printer caller_info => 1;
+
+  my $var = 42;
+  p $var;
+
+will output something like:
+
+  Printing in line 4 of myapp.pl:
+  42
+
+The default message is C<< 'Printing in line __LINE__ of __FILENAME__:' >>.
+The special strings C<__LINE__>, C<__FILENAME__> and C<__PACKAGE__> will
+be interpolated into their according value so you can customize them at will:
+
+  use Data::Printer
+    caller_info => 1,
+    caller_message => "Okay, __PACKAGE__, let's dance!"
+    color => {
+        caller_info => 'bright_red',
+    };
+
+As shown above, you may also set a color for "caller_info" in your color
+hash. Default is cyan.
 
 
 =head1 EXPERIMENTAL FEATURES

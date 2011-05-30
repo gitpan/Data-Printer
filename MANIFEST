@@ -35,5 +35,7 @@ t/18-class_method.t
 t/19-tied.t
 t/20-handles.t
 t/21-ddp.t
+t/22-class_method.t
+t/23-caller_info.t
 t/pod.t
 t/test_file.dat
