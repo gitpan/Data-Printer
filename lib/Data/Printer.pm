@@ -12,7 +12,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.17;
+our $VERSION = 0.18;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -50,7 +50,8 @@ my $properties = {
         'code'        => 'green',
         'glob'        => 'bright_cyan',
         'repeated'    => 'white on_red',
-        'caller_info' => 'bright_cyan'
+        'caller_info' => 'bright_cyan',
+        'weak'        => 'cyan',
     },
     'class' => {
         inherited    => 'none',   # also 0, 'none', 'public' or 'private'
@@ -169,17 +170,23 @@ sub _data_printer {
 
 sub _p {
     my ($item, $p) = @_;
-    my $ref = ref $item;
+    my $ref = (defined $p->{_reftype} ? $p->{_reftype} : ref $item);
     my $tie;
 
     my $string = '';
 
     # Object's unique ID, avoiding circular structures
     my $id = Object::ID::object_id( $item );
-    return colored($p->{_seen}->{$id}, $p->{color}->{repeated}
-    ) if exists $p->{_seen}->{$id};
+    if ( exists $p->{_seen}->{$id} ) {
+        if ( not defined $p->{_reftype} ) {
+            return colored($p->{_seen}->{$id}, $p->{color}->{repeated});
+        }
+    }
+    else {
+        $p->{_seen}->{$id} = $p->{name};
+    }
 
-    $p->{_seen}->{$id} = $p->{name};
+    delete $p->{_reftype}; # abort override
 
     # globs don't play nice
     $ref = 'GLOB' if "$item" =~ /=GLOB\([^()]+\)$/;
@@ -245,6 +252,9 @@ sub ARRAY {
     if ( $p->{max_depth} and $p->{_depth} > $p->{max_depth} ) {
         $string .= '[ ... ]';
     }
+    elsif (not @$item) {
+        $string .= '[]';
+    }
     else {
         $string .= "[$BREAK";
         $p->{_current_indent} += $p->{indent};
@@ -271,6 +281,9 @@ sub ARRAY {
             else {
                 $string .= _p( $array_elem, $p );
             }
+            $string .= ' ' . colored('(weak)', $p->{color}->{'weak'})
+                if $ref and Scalar::Util::isweak($item->[$i]);
+
             $string .= ($i == $#{$item} ? '' : ',') . $BREAK;
             my $size = 2 + length($i); # [10], [100], etc
             substr $p->{name}, -$size, $size, '';
@@ -296,6 +309,7 @@ sub REF {
             qw(SCALAR CODE Regexp ARRAY HASH GLOB REF);
     }
     $string .= _p($$item, $p);
+    $string .= ' ' . colored('(weak)', $p->{color}->{'weak'}) if Scalar::Util::isweak($$item);
     return $string;
 }
 
@@ -321,6 +335,9 @@ sub HASH {
 
     if ( $p->{max_depth} and $p->{_depth} > $p->{max_depth} ) {
         $string .= '{ ... }';
+    }
+    elsif (not keys %$item) {
+        $string .= '{}';
     }
     else {
         $string .= "{$BREAK";
@@ -358,6 +375,9 @@ sub HASH {
             else {
                 $string .= _p( $element, $p );
             }
+            $string .= ' ' . colored('(weak)', $p->{color}->{'weak'})
+                if $ref and Scalar::Util::isweak($item->{$key});
+
             $string .= (--$total_keys == 0 ? '' : ',') . $BREAK;
 
             my $size = 2 + length($key); # {foo}, {z}, etc
@@ -481,29 +501,11 @@ sub _class {
         $string .= _show_methods($ref, $meta, $p);
 
         if ( $p->{'class'}->{'internals'} ) {
-            my $realtype = Scalar::Util::reftype $item;
             $string .= (' ' x $p->{_current_indent})
                     . 'internals: ';
 
-            # Note: we can't do p($$item) directly
-            # or we'd fall in a deep recursion trap
-            if ($realtype eq 'HASH') {
-                my %realvalue = %$item;
-                $string .= _p(\%realvalue, $p);
-            }
-            elsif ($realtype eq 'ARRAY') {
-                my @realvalue = @$item;
-                $string .= _p(\@realvalue, $p);
-            }
-            elsif ($realtype eq 'CODE') {
-                my $realvalue = &$item;
-                $string .= _p(\$realvalue, $p);
-            }
-            # SCALAR and friends
-            else {
-                my $realvalue = $$item;
-                $string .= _p(\$realvalue, $p);
-            }
+            local $p->{_reftype} = Scalar::Util::reftype $item;
+            $string .= _p($item, $p);
             $string .= $BREAK;
         }
 
@@ -766,7 +768,8 @@ Note that both spellings ('color' and 'colour') will work.
         code        => 'green',         # code references
         glob        => 'bright_cyan',   # globs (usually file handles)
         repeated    => 'white on_red',  # references to seen values
-        caller_info => 'bright_cyan' # details on what's being printed
+        caller_info => 'bright_cyan',   # details on what's being printed
+        weak        => 'cyan'           # weak references
      },
    };
 
@@ -1130,6 +1133,42 @@ Or you could just create a very simple wrapper function:
 
 And use it just as you use C<p()>.
 
+=head2 Using Data::Printer in a perl shell (REPL)
+
+Some people really enjoy using a REPL shell to quickly try Perl code. One
+of the most famous ones out there is L<Devel::REPL>. If you use it, now
+you can also see its output with Data::Printer!
+
+Just install L<Devel::REPL::Plugin::DataPrinter> and add the following
+line to your re.pl configuration file (usually ".re.pl/repl.rc" in your
+home dir):
+
+  load_plugin('DataPrinter');
+
+The next time you run C<re.pl>, it should dump all your REPL using
+Data::Printer!
+
+=head2 Unified interface for Data::Printer and other debug formatters
+
+I<< (contributed by Kevin McGrath) >>
+
+If you are porting your code to use Data::Printer instead of
+Data::Dumper or similar, you can just replace:
+
+  use Data::Dumper;
+
+with:
+
+  use Data::Printer alias => 'Dumper';
+  # use Data::Dumper;
+
+making sure to provide Data::Printer with the proper alias for the
+previous dumping function.
+
+If, however, you want a really unified approach where you can easily
+flip between debugging outputs, use L<Any::Renderer> and its plugins,
+like L<< Any::Renderer::Data::Printer|https://github.com/kmcgrath/Any-Renderer-Data-Printer >>.
+
 
 =head1 BUGS
 
@@ -1175,9 +1214,13 @@ with patches, bug reports, wishlists, comments and tests. They are
 
 =item * Eden Cardim (edenc)
 
+=item * Elliot Shank (elliotjs)
+
 =item * Fernando Corrêa (SmokeMachine)
 
 =item * Kartik Thakore (kthakore)
+
+=item * Kevin McGrath (catlgrep)
 
 =item * Kip Hampton (ubu)
 

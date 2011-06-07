@@ -38,4 +38,5 @@ t/21-ddp.t
 t/22-class_method.t
 t/23-caller_info.t
 t/24-no_prototypes.t
+t/25-weak.t
 t/pod.t

@@ -1,5 +1,15 @@
 Revision history for Data-Printer
 
+0.18    07/06/2011
+    NEW FEATURES:
+        - toggle timezone display on DateTime filters (Elliot Shank)
+        - showing weak references (RANDIR)
+        - more concise output for empty structures (RANDIR)
+
+    OTHER:
+        - extra tip on unified dumping interfaces (cat|grep)
+        - extra tip on using Data::Printer with Devel::REPL
+
 0.17    06/06/2011
     NEW FEATURES:
         - filter fallback also for Perl types (RANDIR, GARU)
