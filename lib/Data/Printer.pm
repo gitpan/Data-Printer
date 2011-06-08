@@ -12,7 +12,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.18;
+our $VERSION = 0.19;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -54,11 +54,14 @@ my $properties = {
         'weak'        => 'cyan',
     },
     'class' => {
-        inherited    => 'none',   # also 0, 'none', 'public' or 'private'
+        inherited    => 'none',   # also 'all', 'public' or 'private'
+        parents      => 1,
+        linear_isa   => 1,
         expand       => 1,        # how many levels to expand. 0 for none, 'all' for all
         internals    => 1,
         export       => 1,
         sort_methods => 1,
+        show_methods => 'all',    # also 'none', 'public', 'private'
         _depth       => 0,        # used internally
     },
     'filters' => {
@@ -193,15 +196,18 @@ sub _p {
 
 
     # filter item (if user set a filter for it)
+    my $found;
     if ( exists $p->{filters}->{$ref} ) {
         foreach my $filter ( @{ $p->{filters}->{$ref} } ) {
             if ( defined (my $result = $filter->($item, $p)) ) {
                 $string .= $result;
+                $found = 1;
                 last;
             }
         }
     }
-    else {
+
+    if (not $found) {
         # let '-class' filters have a go
         foreach my $filter ( @{ $p->{filters}->{'-class'} } ) {
             if ( defined (my $result = $filter->($item, $p)) ) {
@@ -426,28 +432,30 @@ sub GLOB {
     # unfortunately, some systems (like Win32) do not
     # implement some of these flags (maybe not even
     # fcntl() itself, so we must wrap it.
-    eval {
-        if (my $flags = fcntl($$item, F_GETFL, 0) ) {
+    my $flags;
+    eval { $flags = fcntl($$item, F_GETFL, 0) };
+    if ($flags) {
+        $extra .= ($flags & O_WRONLY) ? 'write-only'
+                : ($flags & O_RDWR)   ? 'read/write'
+                : 'read-only'
+                ;
 
-            $extra .= ($flags & O_WRONLY) ? 'write-only'
-                    : ($flags & O_RDWR)   ? 'read/write'
-                    : 'read-only'
-                    ;
+        # How to avoid croaking when the system
+        # doesn't implement one of those, without skipping
+        # the whole thing? Maybe there's a better way.
+        # Solaris, for example, doesn't have O_ASYNC :(
+        my %flags = ();
+        eval { $flags{'append'}      = O_APPEND   };
+        eval { $flags{'async'}       = O_ASYNC    };
+        eval { $flags{'create'}      = O_CREAT    };
+        eval { $flags{'truncate'}    = O_TRUNC    };
+        eval { $flags{'nonblocking'} = O_NONBLOCK };
 
-            my %flags = (
-                    'append'      => O_APPEND,
-                    'async'       => O_ASYNC,
-                    'create'      => O_CREAT,
-                    'truncate'    => O_TRUNC,
-                    'nonblocking' => O_NONBLOCK,
-            );
-
-            if (my @flags = grep { $flags & $flags{$_} } keys %flags) {
-                $extra .= ", flags: @flags";
-            }
-            $extra .= ', ';
+        if (my @flags = grep { $flags & $flags{$_} } keys %flags) {
+            $extra .= ", flags: @flags";
         }
-    };
+        $extra .= ', ';
+    }
     my @layers = ();
     eval { @layers = PerlIO::get_layers $$item };
     unless ($@) {
@@ -485,20 +493,25 @@ sub _class {
         my $meta = Class::MOP::Class->initialize($ref);
 
         if ( my @superclasses = $meta->superclasses ) {
-            $string .= (' ' x $p->{_current_indent})
-                    . 'Parents       '
-                    . join(', ', map { colored($_, $p->{color}->{'class'}) }
-                                 @superclasses
-                    ) . $BREAK;
+            if ($p->{class}{parents}) {
+                $string .= (' ' x $p->{_current_indent})
+                        . 'Parents       '
+                        . join(', ', map { colored($_, $p->{color}->{'class'}) }
+                                     @superclasses
+                        ) . $BREAK;
+            }
 
-            $string .= (' ' x $p->{_current_indent})
-                    . 'Linear @ISA   '
-                    . join(', ', map { colored( $_, $p->{color}->{'class'}) }
-                              $meta->linearized_isa
-                    ) . $BREAK;
+            if ($p->{class}{linear_isa}) {
+                $string .= (' ' x $p->{_current_indent})
+                        . 'Linear @ISA   '
+                        . join(', ', map { colored( $_, $p->{color}->{'class'}) }
+                                  $meta->linearized_isa
+                        ) . $BREAK;
+            }
         }
 
-        $string .= _show_methods($ref, $meta, $p);
+        $string .= _show_methods($ref, $meta, $p)
+            if $p->{class}{show_methods} and $p->{class}{show_methods} ne 'none';
 
         if ( $p->{'class'}->{'internals'} ) {
             $string .= (' ' x $p->{_current_indent})
@@ -548,7 +561,11 @@ METHOD:
     }
 
     # render our string doing a natural sort by method name
+    my $show_methods = $p->{class}{show_methods};
     foreach my $type (qw(public private)) {
+        next unless $show_methods eq 'all'
+                 or $show_methods eq $type;
+
         my @list = ($p->{class}{sort_methods} ? nsort @{$methods->{$type}} : @{$methods->{$type}});
 
         $string .= (' ' x $p->{_current_indent})
@@ -818,18 +835,23 @@ customization options available, as shown below (with default values):
                                          # and able to dump themselves.
 
       class => {
-          internals => 1,        # show internal data structures of classes
+          internals  => 1,       # show internal data structures of classes
 
-          inherited => 'none',   # show inherited methods,
+          inherited  => 'none',  # show inherited methods,
                                  # can also be 'all', 'private', or 'public'.
 
-          expand    => 1,        # how deep to traverse the object (in case
+          parents    => 1,       # show parents?
+          linear_isa => 1,       # show the entire @ISA, linearized
+
+          expand     => 1,       # how deep to traverse the object (in case
                                  # it contains other objects). Defaults to
                                  # 1, meaning expand only itself. Can be any
                                  # number, 0 for no class expansion, and 'all'
                                  # to expand everything.
 
-          sort_methods => 1      # sort public and private methods
+          sort_methods => 1,     # sort public and private methods
+
+          show_methods => 'all'  # method list. Also 'none', 'public', 'private'
       },
   };
 
@@ -1223,6 +1245,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 =item * Kevin McGrath (catlgrep)
 
 =item * Kip Hampton (ubu)
+
+=item * Mike Doherty (doherty)
 
 =item * Paul Evans (LeoNerd)
 
