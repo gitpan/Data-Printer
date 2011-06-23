@@ -7,12 +7,12 @@ use Sort::Naturally;
 use Class::MOP;
 use Carp qw(croak);
 use Clone qw(clone);
-require Object::ID;
+use Hash::FieldHash qw(fieldhash);
 use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.19;
+our $VERSION = 0.20;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -143,6 +143,7 @@ sub _data_printer {
         unless ref $_[0];
 
     my ($item, %local_properties) = @_;
+    local %ENV = %ENV;
 
     my $p = _merge(\%local_properties);
     unless ($p->{multiline}) {
@@ -151,8 +152,19 @@ sub _data_printer {
         $p->{'index'}  = 0;
     }
 
-    # colors only if we're not being piped
-    if ( !$p->{colored} or ($p->{colored} eq 'auto' and not -t *STDERR) ) {
+    # We disable colors if colored is set to false.
+    # If set to "auto", we disable colors if the user
+    # set ANSI_COLORS_DISABLED or if we're either
+    # returning the value (instead of printing) or
+    # being piped to another command.
+    if ( !$p->{colored}
+          or ($p->{colored} eq 'auto'
+              and (exists $ENV{ANSI_COLORS_DISABLED}
+                   or defined wantarray
+                   or not -t *STDERR
+                  )
+          )
+    ) {
         $ENV{ANSI_COLORS_DISABLED} = 1;
     }
     else {
@@ -179,7 +191,7 @@ sub _p {
     my $string = '';
 
     # Object's unique ID, avoiding circular structures
-    my $id = Object::ID::object_id( $item );
+    my $id = _object_id( $item );
     if ( exists $p->{_seen}->{$id} ) {
         if ( not defined $p->{_reftype} ) {
             return colored($p->{_seen}->{$id}, $p->{color}->{repeated});
@@ -535,6 +547,23 @@ sub _class {
 ######################################
 ## Auxiliary (internal) subs
 ######################################
+
+# All glory to Vincent Pit for coming up with this implementation,
+# to Goro Fuji for Hash::FieldHash, and of course to Michael Schwern
+# and his "Object::ID", whose code is copied almost verbatim below.
+{
+    fieldhash my %IDs;
+
+    my $Last_ID = "a";
+    sub _object_id {
+        my $self = shift;
+
+        # This is 15% faster than ||=
+        return $IDs{$self} if exists $IDs{$self};
+        return $IDs{$self} = ++$Last_ID;
+    }
+}
+
 
 sub _show_methods {
     my ($ref, $meta, $p) = @_;
@@ -1249,6 +1278,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 =item * Mike Doherty (doherty)
 
 =item * Paul Evans (LeoNerd)
+
+=item * Sebastian Willing (Sewi)
 
 =item * Sergey Aleynikov (randir)
 
