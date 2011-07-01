@@ -1,12 +1,4 @@
 Changes
-inc/Module/Install.pm
-inc/Module/Install/Base.pm
-inc/Module/Install/Can.pm
-inc/Module/Install/Fetch.pm
-inc/Module/Install/Makefile.pm
-inc/Module/Install/Metadata.pm
-inc/Module/Install/Win32.pm
-inc/Module/Install/WriteAll.pm
 lib/Data/Printer.pm
 lib/Data/Printer/Filter.pm
 lib/Data/Printer/Filter/DateTime.pm
@@ -15,8 +7,6 @@ lib/DDP.pm
 Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
-META.json
-META.yml
 README
 t/00-load.t
 t/01-p.t
@@ -47,3 +37,4 @@ t/23-caller_info.t
 t/24-no_prototypes.t
 t/25-weak.t
 t/pod.t
+META.yml                                 Module meta-data (added by MakeMaker)

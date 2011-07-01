@@ -12,7 +12,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.20;
+our $VERSION = 0.21;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -1259,6 +1259,10 @@ with patches, bug reports, wishlists, comments and tests. They are
 
 =item * Chris Prather (perigrin)
 
+=item * David Golden (xdg)
+
+=item * David Raab
+
 =item * Damien Krotkine (dams)
 
 =item * Dotan Dimet
@@ -1274,6 +1278,10 @@ with patches, bug reports, wishlists, comments and tests. They are
 =item * Kevin McGrath (catlgrep)
 
 =item * Kip Hampton (ubu)
+
+=item * Marcel Grünauer (hanekomu)
+
+=item * Matt Trout (mst)
 
 =item * Mike Doherty (doherty)
 
