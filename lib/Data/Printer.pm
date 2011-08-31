@@ -12,7 +12,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.22;
+our $VERSION = 0.23;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -37,6 +37,7 @@ my $properties = {
     'show_tainted'   => 1,
     'show_weak'      => 1,
     'use_prototypes' => 1,
+    'return_value'   => 'dump',       # also 'void' or 'pass'
     'colored'        => 'auto',       # also 0 or 1
     'caller_info'    => 0,
     'caller_message' => 'Printing in line __LINE__ of __FILENAME__:',
@@ -137,9 +138,56 @@ sub import {
 }
 
 
-# get it? get it? :)
-sub p (\[@$%&];%) { _data_printer(@_) }
-sub np            { _data_printer(@_) }
+sub p (\[@$%&];%) {
+    return _print_and_return( $_[0], _data_printer(@_) );
+}
+
+# np() is a p() clone without prototypes.
+# Just like regular Data::Dumper, this version
+# expects a reference as its first argument.
+# We make a single exception for when we only
+# get one argument, in which case we ref it
+# for the user and keep going.
+sub np  {
+    my $item = shift;
+
+    if (!ref $item && @_ == 0) {
+        my $item_value = $item;
+        $item = \$item_value;
+    }
+
+    return _print_and_return( $item, _data_printer($item, @_) );
+}
+
+sub _print_and_return {
+    my ($item, $dump, $p) = @_;
+
+    if ( $p->{return_value} eq 'pass' ) {
+        print STDERR $dump . $/;
+
+        my $ref = ref $item;
+        if ($ref eq 'ARRAY') {
+            return @{ $item };
+        }
+        elsif ($ref eq 'HASH') {
+            return %{ $item };
+        }
+        elsif ( grep { $ref eq $_ } qw(REF SCALAR CODE Regexp GLOB) ) {
+            return $$item;
+        }
+        else {
+            return $item;
+        }
+    }
+    elsif ( $p->{return_value} eq 'void' ) {
+        print STDERR $dump . $/;
+        return;
+    }
+    else {
+        print STDERR $dump . $/ unless defined wantarray;
+        return $dump;
+    }
+}
 
 sub _data_printer {
     croak 'When calling p() without prototypes, please pass arguments as references'
@@ -181,8 +229,7 @@ sub _data_printer {
     }
 
     $out .= _p( $item, $p );
-    print STDERR  $out . $/ unless defined wantarray;
-    return $out;
+    return ($out, $p);
 }
 
 
@@ -757,8 +804,9 @@ your own preferences, create a
 L<< configuration file|/"CONFIGURATION FILE (RUN CONTROL)" >> for
 yourself and Data::Printer will automatically use it!
 
-That's about it :) For more information, including feature set,
-how to create filters, and general tips, just keep reading :)
+B<< That's about it! Feel free to stop reading now and start dumping
+your data structures! For more information, including feature set,
+how to create filters, and general tips, just keep reading :) >>
 
 Oh, if you are just experimenting and/or don't want to use a
 configuration file, you can set all options during initialization,
@@ -833,6 +881,8 @@ Once you load Data::Printer, the C<p()> function will be imported
 into your namespace and available to you. It will pretty-print
 into STDERR whatever variabe you pass to it.
 
+=head2 Return Value
+
 If for whatever reason you want to mangle with the output string
 instead of printing it to STDERR, you can simply ask for a return
 value:
@@ -854,6 +904,30 @@ You can - and should - of course, set this during you "C<use>" call:
   print p( %some_hash );  # will be colored
 
 Or by adding the setting to your C<.dataprinter> file.
+
+As most of Data::Printer, the return value is also configurable. You
+do this by setting the C<return_value> option. There are three options
+available:
+
+=over 4
+
+=item * C<'dump'> (default):
+
+    p %var;               # prints the dump to STDERR (void context)
+    my $string = p %var;  # returns the dump *without* printing
+
+=item * C<'void'>:
+
+    p %var;               # prints the dump to STDERR, never returns.
+    my $string = p %var;  # $string is undef. Data still printed in STDERR
+
+
+=item * C<'pass'>:
+
+    p %var;               # prints the dump to STDERR, returns %var
+    my %copy = p %var;    # %copy = %var. Data still printed in STDERR
+
+=back
 
 =head1 COLORS AND COLORIZATION
 
@@ -933,6 +1007,7 @@ customization options available, as shown below (with default values):
 
       caller_info    => 0,       # include information on what's being printed
       use_prototypes => 1,       # allow p(%foo), but prevent anonymous data
+      return_value   => 'dump',  # what should p() return? See 'Return Value' above.
 
       class_method   => '_data_printer', # make classes aware of Data::Printer
                                          # and able to dump themselves.
@@ -1242,10 +1317,51 @@ Or you could just create a very simple wrapper function:
 
 And use it just as you use C<p()>.
 
+=head2 Minding the return value of p()
+
+I<< (contributed by Matt S. Trout (mst)) >>
+
+There is a reason why explicit return statements are recommended unless
+you know what you're doing. By default, Data::Printer's return value
+depends on how it was called. When not in void context, it returns the
+serialized form of the dump.
+
+It's tempting to trust your own p() calls with that approach, but if
+this is your I<last> statement in a function, you should keep in mind
+your debugging code will behave differently depending on how your
+function was called!
+
+To prevent that, set the C<return_value> property to either 'void'
+or 'pass'. You won't be able to retrieve the dumped string but, hey,
+who does that anyway :)
+
+Assuming you have set the pass-through ('pass') property in your
+C<.dataprinter> file, another stunningly useful thing you can do with it
+is change code that says:
+
+   return $obj->foo;
+
+with:
+
+   use DDP;
+
+   return p $obj->foo;
+
+You can even add it to chained calls if you wish to see the dump of
+a particular state, changing this:
+
+   $obj->foo->bar->baz;
+
+to:
+
+   $obj->foo->DDP::p->bar->baz
+
+And things will "Just Work".
+
 
 =head2 Using p() in some/all of your loaded modules
 
-I<< (contributed by Matt Trout) >>
+I<< (contributed by Matt S. Trout (mst)) >>
 
 While debugging your software, you may want to use Data::Printer in
 some or all loaded modules and not bother having to load it in
@@ -1295,7 +1411,7 @@ tip instead.
 
 =head2 Using Data::Printer from the Perl debugger
 
-I<< (contributed by Árpád Szász and Marcel Grünauer) >>
+I<< (contributed by Árpád Szász and Marcel Grünauer (hanekomu)) >>
 
 With L<DB::Pluggable>, you can easily set the perl debugger to use
 Data::Printer to print variable information, replacing the debugger's
@@ -1359,7 +1475,7 @@ later inspection or render it (if it's a web app).
 
 =head2 Unified interface for Data::Printer and other debug formatters
 
-I<< (contributed by Kevin McGrath) >>
+I<< (contributed by Kevin McGrath (catlgrep)) >>
 
 If you are porting your code to use Data::Printer instead of
 Data::Dumper or similar, you can just replace:
@@ -1377,6 +1493,40 @@ previous dumping function.
 If, however, you want a really unified approach where you can easily
 flip between debugging outputs, use L<Any::Renderer> and its plugins,
 like L<< Any::Renderer::Data::Printer|https://github.com/kmcgrath/Any-Renderer-Data-Printer >>.
+
+=head2 Printing stack traces with arguments expanded using Data::Printer
+
+I<< (contributed by Sergey Aleynikov (randir)) >>
+
+There are times where viewing the current state of a variable is not
+enough, and you want/need to see a full stack trace of a function call.
+
+The L<Devel::PrettyTrace> module uses Data::Printer to provide you just
+that. It exports a C<bt()> function that pretty-prints detailed information
+on each function in your stack, making it easier to spot any issues!
+
+=head2 Troubleshooting apps in real time without changing a single line of your code
+
+I<< (contributed by Marcel Grünauer (hanekomu)) >>
+
+L<dip> is a dynamic instrumentation framework for troubleshooting Perl
+programs, similar to L<DTrace|http://opensolaris.org/os/community/dtrace/>.
+In a nutshell, C<dip> lets you create probes for certain conditions
+in your application that, once met, will perform a specific action. Since
+it uses Aspect-oriented programming, it's very lightweight and you only
+pay for what you use.
+
+C<dip> can be very useful since it allows you to debug your software
+without changing a single line of your original code. And Data::Printer
+comes bundled with it, so you can use the C<p()> function to view your
+data structures too!
+
+   # Print a stack trace every time the name is changed,
+   # except when reading from the database.
+   dip -e 'before { print longmess(p $_->{args}[1]) if $_->{args}[1] }
+     call "MyObj::name" & !cflow("MyObj::read")' myapp.pl
+
+You can check you L<dip>'s own documentation for more information and options.
 
 
 =head1 BUGS
@@ -1439,11 +1589,13 @@ with patches, bug reports, wishlists, comments and tests. They are
 
 =item * Marcel Grünauer (hanekomu)
 
-=item * Matt Trout (mst)
+=item * Matt S. Trout (mst)
 
 =item * Mike Doherty (doherty)
 
 =item * Paul Evans (LeoNerd)
+
+=item * Przemysław Wesołek (jest)
 
 =item * Sebastian Willing (Sewi)
 
