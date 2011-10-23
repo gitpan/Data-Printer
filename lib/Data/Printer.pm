@@ -4,7 +4,6 @@ use warnings;
 use Term::ANSIColor;
 use Scalar::Util;
 use Sort::Naturally;
-use Class::MOP;
 use Carp qw(croak);
 use Clone qw(clone);
 use Hash::FieldHash qw(fieldhash);
@@ -12,7 +11,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.23;
+our $VERSION = 0.24;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -66,6 +65,7 @@ my $properties = {
         export       => 1,
         sort_methods => 1,
         show_methods => 'all',    # also 'none', 'public', 'private'
+        show_reftype => 0,
         _depth       => 0,        # used internally
     },
     'filters' => {
@@ -551,6 +551,13 @@ sub _class {
 
     $string .= colored($ref, $p->{color}->{'class'});
 
+    if ( $p->{class}{show_reftype} ) {
+        $string .= ' (' . colored(
+            Scalar::Util::reftype($item),
+            $p->{color}->{'class'}
+        ) . ')';
+    }
+
     if ($p->{class}{expand} eq 'all'
         or $p->{class}{expand} >= $p->{class}{_depth}
     ) {
@@ -558,6 +565,7 @@ sub _class {
 
         $p->{_current_indent} += $p->{indent};
 
+        require Class::MOP;
         my $meta = Class::MOP::Class->initialize($ref);
 
         if ( my @superclasses = $meta->superclasses ) {
