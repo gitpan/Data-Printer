@@ -11,6 +11,7 @@ README
 t/00-load.t
 t/01-p.t
 t/02-colors.t
+t/02.2-autocolor.t
 t/03-conf.t
 t/03-conf_not_ref.t
 t/04-multiline.t
@@ -42,6 +43,7 @@ t/27.2-pass_through.t
 t/27.3-pass_through-DDP.t
 t/27.4-pass_through-DDP.t
 t/28-void_return.t
+t/29-output.t
 t/pod.t
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)
