@@ -33,4 +33,4 @@ resources:
   bugtracker: http://rt.cpan.org/NoAuth/Bugs.html?Dist=Data-Printer
   license: http://dev.perl.org/licenses/
   repository: http://github.com/garu/Data-Printer
-version: 0.27
+version: 0.28
