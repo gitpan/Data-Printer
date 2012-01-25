@@ -11,7 +11,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.28;
+our $VERSION = 0.29;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -96,15 +96,18 @@ sub import {
     my $args;
     if (scalar @_) {
         $args = @_ == 1 ? shift : {@_};
+        croak 'Data::Printer can receive either a hash or a hash reference.'
+            unless ref $args and ref $args eq 'HASH';
     }
 
     # the RC file overrides the defaults,
     # (and we load it only once)
     unless( exists $properties->{_initialized} ) {
-        my $file = File::Spec->catfile(
-            File::HomeDir->my_home,
-            '.dataprinter'
-        );
+        my $file = ( $args && exists $args->{rc_file} )
+                 ? $args->{rc_file}
+                 : File::Spec->catfile(File::HomeDir->my_home,'.dataprinter')
+                 ;
+
         if (-e $file) {
             if ( open my $fh, '<', $file ) {
                 my $rc_data;
@@ -130,7 +133,7 @@ sub import {
     }
 
     # and 'use' arguments override the RC file
-    if (ref $args and ref $args eq 'HASH') {
+    if ($args) {
         $properties = _merge( $args );
     }
 
@@ -309,13 +312,10 @@ sub SCALAR {
         $string .= colored($$item, $p->{color}->{'number'});
     }
     else {
+        my $val       = $$item;
         my $str_color = color($p->{color}{string} );
         my $esc_color = color($p->{color}{escaped});
 
-        # always escape the null character
-        my $val  = $$item;
-        my $null = $esc_color . '\0' . $str_color;
-        $val =~ s/\0/$null/g;
 
         unless ($p->{escape_chars}) {
             my %escaped = (
@@ -332,6 +332,11 @@ sub SCALAR {
                 $val =~ s/$k/$esc/g;
             }
         }
+
+        # always escape the null character
+        my $null = $esc_color . '\0' . $str_color;
+        $val =~ s/\0/$null/g;
+
         $string .= colored(qq["$val"], $p->{color}->{'string'});
     }
 
@@ -1690,6 +1695,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 =item * Jesse Luehrs (doy)
 
 =item * Kartik Thakore (kthakore)
+
+=item * Kevin Dawson (bowtie)
 
 =item * Kevin McGrath (catlgrep)
 
