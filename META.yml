@@ -24,6 +24,7 @@ requires:
   Fcntl: 0
   File::HomeDir: 0.91
   File::Spec: 0
+  File::Temp: 0
   Hash::FieldHash: 0
   Scalar::Util: 0
   Sort::Naturally: 0
@@ -33,4 +34,4 @@ resources:
   bugtracker: http://rt.cpan.org/NoAuth/Bugs.html?Dist=Data-Printer
   license: http://dev.perl.org/licenses/
   repository: http://github.com/garu/Data-Printer
-version: 0.29
+version: 0.3

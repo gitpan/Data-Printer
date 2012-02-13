@@ -1,7 +1,7 @@
 package Data::Printer;
 use strict;
 use warnings;
-use Term::ANSIColor;
+use Term::ANSIColor qw(color colored colorstrip);
 use Scalar::Util;
 use Sort::Naturally;
 use Carp qw(croak);
@@ -11,7 +11,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.29;
+our $VERSION = 0.30;
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -35,7 +35,9 @@ my $properties = {
     'show_tied'      => 1,
     'show_tainted'   => 1,
     'show_weak'      => 1,
-    'escape_chars'   => 1,
+    #'escape_chars'   => 1, ### <== DEPRECATED!!!
+    'print_escapes'  => 0,
+    'quote_keys'     => 'auto',
     'use_prototypes' => 1,
     'output'         => 'stderr',
     'return_value'   => 'dump',       # also 'void' or 'pass'
@@ -312,30 +314,7 @@ sub SCALAR {
         $string .= colored($$item, $p->{color}->{'number'});
     }
     else {
-        my $val       = $$item;
-        my $str_color = color($p->{color}{string} );
-        my $esc_color = color($p->{color}{escaped});
-
-
-        unless ($p->{escape_chars}) {
-            my %escaped = (
-                    "\n" => $esc_color . '\n' . $str_color,
-                    "\r" => $esc_color . '\r' . $str_color,
-                    "\t" => $esc_color . '\t' . $str_color,
-                    "\f" => $esc_color . '\f' . $str_color,
-                    "\b" => $esc_color . '\b' . $str_color,
-                    "\a" => $esc_color . '\a' . $str_color,
-                    "\e" => $esc_color . '\e' . $str_color,
-            );
-            foreach my $k ( keys %escaped ) {
-                my $esc = $escaped{$k};
-                $val =~ s/$k/$esc/g;
-            }
-        }
-
-        # always escape the null character
-        my $null = $esc_color . '\0' . $str_color;
-        $val =~ s/\0/$null/g;
+        my $val = _escape_chars($$item, $p->{color}{string}, $p);
 
         $string .= colored(qq["$val"], $p->{color}->{'string'});
     }
@@ -346,6 +325,40 @@ sub SCALAR {
     $p->{_tie} = ref tied $$item;
 
     return $string;
+}
+
+sub _escape_chars {
+    my ($str, $orig_color, $p) = @_;
+
+    $orig_color   = color( $orig_color );
+    my $esc_color = color( $p->{color}{escaped} );
+
+    my $escape_chars = 1;
+    if (exists $p->{escape_chars}) {
+        Carp::carp q('escape_chars' is deprecated!);
+        $escape_chars = $p->{escape_chars};
+    }
+
+    if ($p->{print_escapes} || !$escape_chars) {
+        my %escaped = (
+            "\n" => $esc_color . '\n' . $orig_color,
+            "\r" => $esc_color . '\r' . $orig_color,
+            "\t" => $esc_color . '\t' . $orig_color,
+            "\f" => $esc_color . '\f' . $orig_color,
+            "\b" => $esc_color . '\b' . $orig_color,
+            "\a" => $esc_color . '\a' . $orig_color,
+            "\e" => $esc_color . '\e' . $orig_color,
+        );
+        foreach my $k ( keys %escaped ) {
+            my $esc = $escaped{$k};
+            $str =~ s/$k/$esc/g;
+        }
+    }
+    # always escape the null character
+    my $null = $esc_color . '\0' . $orig_color;
+    $str =~ s/\0/$null/g;
+
+    return $str;
 }
 
 
@@ -451,26 +464,55 @@ sub HASH {
         $string .= "{$BREAK";
         $p->{_current_indent} += $p->{indent};
 
-        # length of the largest key is used for indenting
-        my $len = 0;
-        if ($p->{multiline}) {
-            foreach (keys %$item) {
-                my $l = length;
+        my $total_keys  = scalar keys %$item;
+        my $len         = 0;
+        my $multiline   = $p->{multiline};
+        my $hash_color  = $p->{color}{hash};
+        my $quote_keys  = $p->{quote_keys};
+
+        my @keys = ();
+
+        # first pass, preparing keys to display (and getting largest key size)
+        foreach my $key ($p->{sort_keys} ? nsort keys %$item : keys %$item ) {
+            my $new_key = _escape_chars($key, $hash_color, $p);
+            my $colored = colored( $new_key, $hash_color );
+
+            # wrap in uncolored single quotes if there's
+            # any space or escaped characters
+            if ( $quote_keys
+                  and (
+                        $quote_keys ne 'auto'
+                        or (
+                             $key eq q()
+                             or $new_key ne $key
+                             or $new_key =~ /\s|\n|\t|\r/
+                        )
+                  )
+            ) {
+                $colored = qq['$colored'];
+            }
+
+            push @keys, {
+                raw     => $key,
+                colored => $colored,
+            };
+
+            # length of the largest key is used for indenting
+            if ($multiline) {
+                my $l = length colorstrip($colored);
                 $len = $l if $l > $len;
             }
         }
 
-        my $total_keys = scalar keys %$item;
-        my @keys = ($p->{sort_keys} ? nsort keys %$item : keys %$item );
+        # second pass, traversing and rendering
         foreach my $key (@keys) {
-            $p->{name} .= "{$key}";
-            my $element = $item->{$key};
+            my $raw_key     = $key->{raw};
+            my $colored_key = $key->{colored};
+            my $element     = $item->{$raw_key};
+            $p->{name}     .= "{$raw_key}";
 
             $string .= (' ' x $p->{_current_indent})
-                     . colored(
-                             sprintf("%-*s", $len, $key),
-                             $p->{color}->{'hash'}
-                       )
+                     . sprintf("%-*s", $len, $colored_key)
                      . $p->{hash_separator}
                      ;
 
@@ -483,12 +525,15 @@ sub HASH {
             else {
                 $string .= _p( $element, $p );
             }
+
             $string .= ' ' . colored('(weak)', $p->{color}->{'weak'})
-                if $ref and Scalar::Util::isweak($item->{$key}) and $p->{show_weak};
+                if $ref
+                  and $p->{show_weak}
+                  and Scalar::Util::isweak($item->{$raw_key});
 
             $string .= (--$total_keys == 0 ? '' : ',') . $BREAK;
 
-            my $size = 2 + length($key); # {foo}, {z}, etc
+            my $size = 2 + length($raw_key); # {foo}, {z}, etc
             substr $p->{name}, -$size, $size, '';
         }
         $p->{_current_indent} -= $p->{indent};
@@ -1104,7 +1149,9 @@ customization options available, as shown below (with default values):
       show_tied      => 1,       # expose tied variables
       show_tainted   => 1,       # expose tainted variables
       show_weak      => 1,       # expose weak references
-      escape_chars   => 0,       # escape non-printable chars (\n, \t, etc)
+      print_escapes  => 0,       # print non-printable chars as "\n", "\t", etc.
+      quote_keys     => 'auto',  # quote hash keys (1 for always, 0 for never).
+                                 # 'auto' will quote when key is empty/space-only.
 
       caller_info    => 0,       # include information on what's being printed
       use_prototypes => 1,       # allow p(%foo), but prevent anonymous data
@@ -1137,6 +1184,15 @@ customization options available, as shown below (with default values):
   };
 
 Note: setting C<multiline> to C<0> will also set C<index> and C<indent> to C<0>.
+
+=head3 WARNING: C<escape_chars> is **deprecated**:
+
+In versions 0.28 and 0.29 there was a property called 'escape_chars' that
+was replaced by 'print_escapes' to avoid ambiguity. The old name was
+confusing because 'escape' could be interpreted as a noun or as an adjective.
+
+It will still work until version 0.32, but wil trigger a warning so you
+can update your code and/or RC file. Please use 'print_escapes' instead. Thanks!
 
 
 =head1 FILTERS
@@ -1262,6 +1318,15 @@ while debugging scripts is:
 
 and it will load your custom settings every time :)
 
+=head2 Loading RC files in custom locations
+
+If your RC file is somewhere other than C<.dataprinter> in your home
+dir, you can load whichever file you want via the C<'rc_file'> parameter:
+
+  use Data::Printer rc_file => '/path/to/my/rcfile.conf';
+
+You can even set this to undef or to a non-existing file to disable your
+RC file at will.
 
 =head1 THE "DDP" PACKAGE ALIAS
 
@@ -1666,6 +1731,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 
 =item * Allan Whiteford
 
+=item * Andy Bach
+
 =item * Árpád Szász
 
 =item * brian d foy
@@ -1705,6 +1772,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 =item * Marcel Grünauer (hanekomu)
 
 =item * Matt S. Trout (mst)
+
+=item * Maxim Vuets
 
 =item * Mike Doherty (doherty)
 

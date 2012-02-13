@@ -46,7 +46,9 @@ t/27.4-pass_through-DDP.t
 t/28-void_return.t
 t/29-output.t
 t/30-escape_chars.t
+t/30.2-print_escapes.t
 t/31-bad_parameters.t
+t/32-quote_keys.t
 t/pod.t
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)
