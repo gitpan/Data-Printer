@@ -12,7 +12,7 @@ use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = '0.30_01';
+our $VERSION = '0.30_02';
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -931,7 +931,7 @@ sub _load_rc_file {
         if( ${^TAINT} != 0 ) {
             if ( $args->{allow_tainted} ) {
                 warn "WARNING: Reading tainted file '$file' due to user override.\n";
-                $rc_data =~ /(.+)/; # very bad idea - god help you
+                $rc_data =~ /(.+)/s; # very bad idea - god help you
                 $rc_data = $1;
             }
             else {
@@ -1923,9 +1923,13 @@ with patches, bug reports, wishlists, comments and tests. They are
 
 =item * Przemysław Wesołek (jest)
 
+=item * Rob Hoelz (hoelzro)
+
 =item * Sebastian Willing (Sewi)
 
 =item * Sergey Aleynikov (randir)
+
+=item * Stephen Thirlwall (sdt)
 
 =item * sugyan
 
