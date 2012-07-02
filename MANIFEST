@@ -1,8 +1,10 @@
 Changes
+examples/try_me.pl
 lib/Data/Printer.pm
 lib/Data/Printer/Filter.pm
 lib/Data/Printer/Filter/DateTime.pm
 lib/Data/Printer/Filter/DB.pm
+lib/Data/Printer/Filter/Digest.pm
 lib/DDP.pm
 Makefile.PL
 MANIFEST			This list of files
@@ -25,10 +27,14 @@ t/11-aliased_with_filter.t
 t/12-filter_class.t
 t/13-filter_datetime.t
 t/13.2-filter_db.t
+t/13.3-filter_digest.t
 t/14-local_conf.t
 t/15-rc_file.t
 t/16-rc_file2.t
 t/16.2-rc_overwrite.t
+t/16.3-rc_env.t
+t/16.4-rc_env2.t
+t/16.5-rc_env3.t
 t/17-parallel.t
 t/18-class_method.t
 t/19-tied.t
@@ -49,6 +55,9 @@ t/30-escape_chars.t
 t/30.2-print_escapes.t
 t/31-bad_parameters.t
 t/32-quote_keys.t
+t/33-end_separator.t
+t/33-separator.t
+t/pod-coverage.t
 t/pod.t
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)

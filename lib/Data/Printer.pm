@@ -5,13 +5,14 @@ use Term::ANSIColor qw(color colored colorstrip);
 use Scalar::Util;
 use Sort::Naturally;
 use Carp qw(croak);
-use Clone qw(clone);
-use Hash::FieldHash qw(fieldhash);
+use Clone::PP qw(clone);
+use if $] >= 5.010, 'Hash::Util::FieldHash' => qw(fieldhash);
+use if $] < 5.010, 'Hash::Util::FieldHash::Compat' => qw(fieldhash);
 use File::Spec;
 use File::HomeDir ();
 use Fcntl;
 
-our $VERSION = 0.30;
+our $VERSION = '0.30_01';
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -32,6 +33,8 @@ my $properties = {
     'sort_keys'      => 1,
     'deparse'        => 0,
     'hash_separator' => '   ',
+    'separator'      => ',',
+    'end_separator'  => 0,
     'show_tied'      => 1,
     'show_tainted'   => 1,
     'show_weak'      => 1,
@@ -50,6 +53,7 @@ my $properties = {
         'number'      => 'bright_blue',
         'string'      => 'bright_yellow',
         'class'       => 'bright_green',
+        'method'      => 'bright_green',
         'undef'       => 'bright_red',
         'hash'        => 'magenta',
         'regex'       => 'yellow',
@@ -64,7 +68,7 @@ my $properties = {
     'class' => {
         inherited    => 'none',   # also 'all', 'public' or 'private'
         parents      => 1,
-        linear_isa   => 1,
+        linear_isa   => 'auto',
         expand       => 1,        # how many levels to expand. 0 for none, 'all' for all
         internals    => 1,
         export       => 1,
@@ -105,32 +109,7 @@ sub import {
     # the RC file overrides the defaults,
     # (and we load it only once)
     unless( exists $properties->{_initialized} ) {
-        my $file = ( $args && exists $args->{rc_file} )
-                 ? $args->{rc_file}
-                 : File::Spec->catfile(File::HomeDir->my_home,'.dataprinter')
-                 ;
-
-        if (-e $file) {
-            if ( open my $fh, '<', $file ) {
-                my $rc_data;
-                { local $/; $rc_data = <$fh> }
-                close $fh;
-
-                my $config = eval $rc_data;
-                if ( $@ ) {
-                    warn "Error loading $file: $@\n";
-                }
-                elsif (!ref $config or ref $config ne 'HASH') {
-                    warn "Error loading $file: config file must return a hash reference\n";
-                }
-                else {
-                    $properties = _merge( $config );
-                }
-            }
-            else {
-                warn "error opening '$file': $!\n";
-            }
-        }
+        _load_rc_file($args);
         $properties->{_initialized} = 1;
     }
 
@@ -402,7 +381,11 @@ sub ARRAY {
             $string .= ' ' . colored('(weak)', $p->{color}->{'weak'})
                 if $ref and Scalar::Util::isweak($item->[$i]) and $p->{show_weak};
 
-            $string .= ($i == $#{$item} ? '' : ',') . $BREAK;
+            $string .= $p->{separator}
+              if $i < $#{$item} || $p->{end_separator};
+
+            $string .= $BREAK;
+
             my $size = 2 + length($i); # [10], [100], etc
             substr $p->{name}, -$size, $size, '';
         }
@@ -531,7 +514,10 @@ sub HASH {
                   and $p->{show_weak}
                   and Scalar::Util::isweak($item->{$raw_key});
 
-            $string .= (--$total_keys == 0 ? '' : ',') . $BREAK;
+            $string .= $p->{separator}
+              if --$total_keys > 0 || $p->{end_separator};
+
+            $string .= $BREAK;
 
             my $size = 2 + length($raw_key); # {foo}, {z}, etc
             substr $p->{name}, -$size, $size, '';
@@ -620,9 +606,8 @@ sub _class {
     my $ref = ref $item;
 
     # if the user specified a method to use instead, we do that
-    if ( $p->{class_method} and $item->can($p->{class_method}) ) {
-        my $method = $p->{class_method};
-        return $item->$method;
+    if ( $p->{class_method} and my $method = $item->can($p->{class_method}) ) {
+        return $method->($item, $p);
     }
 
     my $string = '';
@@ -644,10 +629,16 @@ sub _class {
 
         $p->{_current_indent} += $p->{indent};
 
-        require Class::MOP;
-        my $meta = Class::MOP::Class->initialize($ref);
+        if ($] >= 5.010) {
+            require mro;
+        } else {
+            require MRO::Compat;
+        }
+        require Package::Stash;
 
-        if ( my @superclasses = $meta->superclasses ) {
+        my $stash = Package::Stash->new($ref);
+
+        if ( my @superclasses = @{$stash->get_symbol('@ISA')||[]} ) {
             if ($p->{class}{parents}) {
                 $string .= (' ' x $p->{_current_indent})
                         . 'Parents       '
@@ -656,16 +647,22 @@ sub _class {
                         ) . $BREAK;
             }
 
-            if ($p->{class}{linear_isa}) {
+            if ( $p->{class}{linear_isa} and
+                  (
+                    ($p->{class}{linear_isa} eq 'auto' and @superclasses > 1)
+                    or
+                    ($p->{class}{linear_isa} ne 'auto')
+                  )
+            ) {
                 $string .= (' ' x $p->{_current_indent})
                         . 'Linear @ISA   '
                         . join(', ', map { colored( $_, $p->{color}->{'class'}) }
-                                  $meta->linearized_isa
+                                  @{mro::get_linear_isa($ref)}
                         ) . $BREAK;
             }
         }
 
-        $string .= _show_methods($ref, $meta, $p)
+        $string .= _show_methods($ref, $p)
             if $p->{class}{show_methods} and $p->{class}{show_methods} ne 'none';
 
         if ( $p->{'class'}->{'internals'} ) {
@@ -709,7 +706,7 @@ sub _class {
 
 
 sub _show_methods {
-    my ($ref, $meta, $p) = @_;
+    my ($ref, $p) = @_;
 
     my $string = '';
     my $methods = {
@@ -718,15 +715,40 @@ sub _show_methods {
     };
     my $inherited = $p->{class}{inherited} || 'none';
 
+    require B;
+
+    my $methods_of = sub {
+        my ($name) = @_;
+        map {
+            my $m;
+            if ($_
+                and $m = B::svref_2object($_)
+                and $m->isa('B::CV')
+                and not $m->GV->isa('B::Special')
+            ) {
+                [ $m->GV->STASH->NAME, $m->GV->NAME ]
+            } else {
+                ()
+            }
+        } values %{Package::Stash->new($name)->get_all_symbols('CODE')}
+    };
+
+    my %seen_method_name;
+
 METHOD:
-    foreach my $method ($meta->get_all_methods) {
-        my $method_string = $method->name;
+    foreach my $method (
+        map $methods_of->($_), @{mro::get_linear_isa($ref)}, 'UNIVERSAL'
+    ) {
+        my ($package_string, $method_string) = @$method;
+
+        next METHOD if $seen_method_name{$method_string}++;
+
         my $type = substr($method_string, 0, 1) eq '_' ? 'private' : 'public';
 
-        if ($method->package_name ne $ref) {
+        if ($package_string ne $ref) {
             next METHOD unless $inherited ne 'none'
                            and ($inherited eq 'all' or $type eq $inherited);
-            $method_string .= ' (' . $method->package_name . ')';
+            $method_string .= ' (' . $package_string . ')';
         }
 
         push @{ $methods->{$type} }, $method_string;
@@ -743,7 +765,7 @@ METHOD:
         $string .= (' ' x $p->{_current_indent})
                  . "$type methods (" . scalar @list . ')'
                  . (@list ? ' : ' : '')
-                 . join(', ', map { colored($_, $p->{color}->{class}) }
+                 . join(', ', map { colored($_, $p->{color}->{method}) }
                               @list
                    ) . $BREAK;
     }
@@ -873,6 +895,65 @@ sub _merge {
     }
 
     return $clone;
+}
+
+
+sub _load_rc_file {
+    my $args = shift || {};
+
+    my $file = exists $args->{rc_file}    ? $args->{rc_file}
+             : exists $ENV{DATAPRINTERRC} ? $ENV{DATAPRINTERRC}
+             : File::Spec->catfile(File::HomeDir->my_home,'.dataprinter');
+
+    return unless -e $file;
+
+    my $mode = (stat $file )[2];
+    if ($mode & 0020 || $mode & 0002) {
+        warn "rc file '$file' must NOT be writeable to other users. Skipping.\n";
+        return;
+    }
+
+    if ( -l $file || (!-f _) || -p _ || -S _ || -b _ || -c _ ) {
+        warn "rc file '$file' doesn't look like a plain file. Skipping.\n";
+        return;
+    }
+
+    unless (-o $file) {
+        warn "rc file '$file' must be owned by your (effective) user. Skipping.\n";
+        return;
+    }
+
+    if ( open my $fh, '<', $file ) {
+        my $rc_data;
+        { local $/; $rc_data = <$fh> }
+        close $fh;
+
+        if( ${^TAINT} != 0 ) {
+            if ( $args->{allow_tainted} ) {
+                warn "WARNING: Reading tainted file '$file' due to user override.\n";
+                $rc_data =~ /(.+)/; # very bad idea - god help you
+                $rc_data = $1;
+            }
+            else {
+                warn "taint mode on: skipping rc file '$file'.\n";
+                return;
+            }
+        }
+
+        my $config = eval $rc_data;
+        if ( $@ ) {
+            warn "Error loading $file: $@\n";
+        }
+        elsif (!ref $config or ref $config ne 'HASH') {
+            warn "Error loading $file: config file must return a hash reference\n";
+        }
+        else {
+            $properties = _merge( $config );
+        }
+    }
+    else {
+        warn "error opening '$file': $!\n";
+    }
 }
 
 
@@ -1084,6 +1165,7 @@ Note that both spellings ('color' and 'colour') will work.
         number      => 'bright_blue',   # numbers
         string      => 'bright_yellow', # strings
         class       => 'bright_green',  # class names
+        method      => 'bright_green',  # method names
         undef       => 'bright_red',    # the 'undef' value
         hash        => 'magenta',       # hash keys
         regex       => 'yellow',        # regular expressions
@@ -1152,6 +1234,9 @@ customization options available, as shown below (with default values):
       print_escapes  => 0,       # print non-printable chars as "\n", "\t", etc.
       quote_keys     => 'auto',  # quote hash keys (1 for always, 0 for never).
                                  # 'auto' will quote when key is empty/space-only.
+      separator      => ',',     # uses ',' to separate array/hash elements
+      end_separator  => 0,       # prints the separator after last element in array/hash.
+                                 # the default is 0 that means not to print
 
       caller_info    => 0,       # include information on what's being printed
       use_prototypes => 1,       # allow p(%foo), but prevent anonymous data
@@ -1168,8 +1253,10 @@ customization options available, as shown below (with default values):
           inherited  => 'none',  # show inherited methods,
                                  # can also be 'all', 'private', or 'public'.
 
-          parents    => 1,       # show parents?
-          linear_isa => 1,       # show the entire @ISA, linearized
+          parents    => 1,       # show parents, if there are any
+          linear_isa => 'auto',  # show the entire @ISA, linearized, whenever
+                                 # the object has more than one parent. Can
+                                 # also be set to 1 (always show) or 0 (never).
 
           expand     => 1,       # how deep to traverse the object (in case
                                  # it contains other objects). Defaults to
@@ -1327,6 +1414,50 @@ dir, you can load whichever file you want via the C<'rc_file'> parameter:
 
 You can even set this to undef or to a non-existing file to disable your
 RC file at will.
+
+The RC file location can also be specified with the C<DATAPRINTERRC>
+environment variable. Using C<rc_file> in code will override the environment
+variable.
+
+=head2 RC File Security
+
+The C<.dataprinter> RC file is nothing but a Perl hash that
+gets C<eval>'d back into the code. This means that whatever
+is in your RC file B<WILL BE INTERPRETED BY PERL AT RUNTIME>.
+This can be quite worrying if you're not the one in control
+of the RC file.
+
+For this reason, Data::Printer takes extra precaution before
+loading the file:
+
+=over 4
+
+=item * The file has to be in your home directory unless you
+specifically point elsewhere via the 'C<rc_file>' property or
+the DATAPRINTERRC environment variable;
+
+=item * The file B<must> be a plain file, never a symbolic
+link, named pipe or socket;
+
+=item * The file B<must> be owned by you (i.e. the effective
+user id that ran the script using Data::Printer);
+
+=item * The file B<must> be read-only for everyone but your user.
+This usually means permissions C<0644>, C<0640> or C<0600> in
+Unix-like systems;
+
+=item * The file will B<NOT> be loaded in Taint mode, unless
+you specifically load Data::Printer with the 'allow_tainted'
+option set to true. And even if you do that, Data::Printer
+will still issue a warning before loading the file. But
+seriously, don't do that.
+
+=back
+
+Failure to comply with the security rules above will result in
+the RC file not being loaded (likely with a warning on what went
+wrong).
+
 
 =head1 THE "DDP" PACKAGE ALIAS
 
@@ -1696,6 +1827,13 @@ data structures too!
 
 You can check you L<dip>'s own documentation for more information and options.
 
+=head2 Sample output for color fine-tuning
+
+I<< (contributed by Yanick Champoux (yanick)) >>
+
+The "examples/try_me.pl" file included in this distribution has a sample
+dump with a complex data structure to let you quickly test color schemes.
+
 
 =head1 BUGS
 
@@ -1757,9 +1895,13 @@ with patches, bug reports, wishlists, comments and tests. They are
 
 =item * Fitz Elliott
 
+=item * Ivan Bessarabov (bessarabv)
+
 =item * J Mash
 
 =item * Jesse Luehrs (doy)
+
+=item * Joel Berger (jberger)
 
 =item * Kartik Thakore (kthakore)
 
@@ -1794,6 +1936,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 =item * Torsten Raudssus (Getty)
 
 =item * Wesley Dal`Col (blabos)
+
+=item * Yanick Champoux (yanick)
 
 =back
 

@@ -1,7 +1,7 @@
 package Data::Printer::Filter;
 use strict;
 use warnings;
-use Clone qw(clone);
+use Clone::PP qw(clone);
 require Data::Printer;
 
 my %_filters_for = ();
@@ -102,7 +102,7 @@ Create your filter module:
 
       return $ref->some_method;   # or whatever
 
-      # see L</HELPER FUNCTIONS> below for
+      # see 'HELPER FUNCTIONS' below for
       # customization options, including
       # proper indentation.
   }

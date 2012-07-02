@@ -5,6 +5,7 @@ use Test::More;
 my $file;
 BEGIN {
     delete $ENV{ANSI_COLORS_DISABLED};
+    delete $ENV{DATAPRINTERRC};
     use Term::ANSIColor;
     use File::HomeDir::Test;
     use File::HomeDir;
@@ -18,6 +19,7 @@ BEGIN {
     if (-e $file) {
         plan skip_all => 'File .dataprinter should not be in test homedir';
     }
+    umask 0022;
     open my $fh, '>', $file
         or plan skip_all => "error opening .dataprinter: $!";
 

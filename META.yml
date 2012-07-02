@@ -7,7 +7,7 @@ build_requires:
 configure_requires:
   ExtUtils::MakeMaker: 0
 dynamic_config: 1
-generated_by: 'ExtUtils::MakeMaker version 6.62, CPAN::Meta::Converter version 2.113640'
+generated_by: 'ExtUtils::MakeMaker version 6.6302, CPAN::Meta::Converter version 2.120921'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -19,13 +19,12 @@ no_index:
     - inc
 requires:
   Carp: 0
-  Class::MOP: 0.81
-  Clone: 0
+  Clone::PP: 0
   Fcntl: 0
   File::HomeDir: 0.91
   File::Spec: 0
   File::Temp: 0
-  Hash::FieldHash: 0
+  Package::Stash: 0.3
   Scalar::Util: 0
   Sort::Naturally: 0
   Term::ANSIColor: 3
@@ -34,4 +33,4 @@ resources:
   bugtracker: http://rt.cpan.org/NoAuth/Bugs.html?Dist=Data-Printer
   license: http://dev.perl.org/licenses/
   repository: http://github.com/garu/Data-Printer
-version: 0.3
+version: 0.30_01
