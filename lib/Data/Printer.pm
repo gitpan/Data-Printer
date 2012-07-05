@@ -11,8 +11,9 @@ use if $] < 5.010, 'Hash::Util::FieldHash::Compat' => qw(fieldhash);
 use File::Spec;
 use File::HomeDir ();
 use Fcntl;
+use version 0.77 ();
 
-our $VERSION = '0.30_02';
+our $VERSION = '0.30_03';
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -38,6 +39,7 @@ my $properties = {
     'show_tied'      => 1,
     'show_tainted'   => 1,
     'show_weak'      => 1,
+    'show_readonly'  => 0,
     #'escape_chars'   => 1, ### <== DEPRECATED!!!
     'print_escapes'  => 0,
     'quote_keys'     => 'auto',
@@ -59,6 +61,7 @@ my $properties = {
         'regex'       => 'yellow',
         'code'        => 'green',
         'glob'        => 'bright_cyan',
+        'vstring'     => 'bright_blue',
         'repeated'    => 'white on_red',
         'caller_info' => 'bright_cyan',
         'weak'        => 'cyan',
@@ -67,6 +70,7 @@ my $properties = {
     },
     'class' => {
         inherited    => 'none',   # also 'all', 'public' or 'private'
+        universal    => 1,
         parents      => 1,
         linear_isa   => 'auto',
         expand       => 1,        # how many levels to expand. 0 for none, 'all' for all
@@ -78,14 +82,15 @@ my $properties = {
         _depth       => 0,        # used internally
     },
     'filters' => {
-        SCALAR => [ \&SCALAR ],
-        ARRAY  => [ \&ARRAY  ],
-        HASH   => [ \&HASH   ],
-        REF    => [ \&REF    ],
-        CODE   => [ \&CODE   ],
-        GLOB   => [ \&GLOB   ],
-        Regexp => [ \&Regexp ],
-        -class => [ \&_class ],
+        SCALAR => [ \&SCALAR  ],
+        ARRAY  => [ \&ARRAY   ],
+        HASH   => [ \&HASH    ],
+        REF    => [ \&REF     ],
+        CODE   => [ \&CODE    ],
+        GLOB   => [ \&GLOB    ],
+        VSTRING=> [ \&VSTRING ],
+        Regexp => [ \&Regexp  ],
+        -class => [ \&_class  ],
     },
 
     _output          => *STDERR,     # used internally
@@ -160,7 +165,7 @@ sub _print_and_return {
         elsif ($ref eq 'HASH') {
             return %{ $item };
         }
-        elsif ( grep { $ref eq $_ } qw(REF SCALAR CODE Regexp GLOB) ) {
+        elsif ( grep { $ref eq $_ } qw(REF SCALAR CODE Regexp GLOB VSTRING) ) {
             return $$item;
         }
         else {
@@ -302,6 +307,10 @@ sub SCALAR {
         if $p->{show_tainted} and Scalar::Util::tainted($$item);
 
     $p->{_tie} = ref tied $$item;
+
+    if ($p->{show_readonly} and &Internals::SvREADONLY( $item )) {
+        $string .= ' (read-only)';
+    }
 
     return $string;
 }
@@ -553,6 +562,13 @@ sub Regexp {
     return $string;
 }
 
+sub VSTRING {
+    my ($item, $p) = @_;
+    my $string = '';
+    $string .= colored(version->declare($$item)->normal, $p->{color}->{'vstring'});
+    return $string;
+}
+
 
 sub GLOB {
     my ($item, $p) = @_;
@@ -606,7 +622,7 @@ sub _class {
     my $ref = ref $item;
 
     # if the user specified a method to use instead, we do that
-    if ( $p->{class_method} and my $method = $item->can($p->{class_method}) ) {
+    if ( $p->{class_method} and Scalar::Util::blessed($item) and my $method = $item->can($p->{class_method}) ) {
         return $method->($item, $p);
     }
 
@@ -737,7 +753,8 @@ sub _show_methods {
 
 METHOD:
     foreach my $method (
-        map $methods_of->($_), @{mro::get_linear_isa($ref)}, 'UNIVERSAL'
+        map $methods_of->($_), @{mro::get_linear_isa($ref)},
+                               $p->{class}{universal} ? 'UNIVERSAL' : ()
     ) {
         my ($package_string, $method_string) = @$method;
 
@@ -1252,6 +1269,8 @@ customization options available, as shown below (with default values):
 
           inherited  => 'none',  # show inherited methods,
                                  # can also be 'all', 'private', or 'public'.
+
+          universal  => 1,       # include UNIVERSAL methods in inheritance list
 
           parents    => 1,       # show parents, if there are any
           linear_isa => 'auto',  # show the entire @ISA, linearized, whenever
@@ -1922,6 +1941,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 =item * Paul Evans (LeoNerd)
 
 =item * Przemysław Wesołek (jest)
+
+=item * Rebecca Turner (iarna)
 
 =item * Rob Hoelz (hoelzro)
 
