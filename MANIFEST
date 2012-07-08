@@ -59,6 +59,8 @@ t/33-end_separator.t
 t/33-separator.t
 t/34-show_readonly.t
 t/34-vstrings.t
+t/35-vstrings.t
+t/36-valign.t
 t/pod-coverage.t
 t/pod.t
 META.yml                                 Module YAML meta-data (added by MakeMaker)

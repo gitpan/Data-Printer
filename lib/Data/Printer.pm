@@ -1,7 +1,7 @@
 package Data::Printer;
 use strict;
 use warnings;
-use Term::ANSIColor qw(color colored colorstrip);
+use Term::ANSIColor qw(color colored);
 use Scalar::Util;
 use Sort::Naturally;
 use Carp qw(croak);
@@ -13,7 +13,7 @@ use File::HomeDir ();
 use Fcntl;
 use version 0.77 ();
 
-our $VERSION = '0.30_03';
+our $VERSION = '0.30_04';
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -67,6 +67,7 @@ my $properties = {
         'weak'        => 'cyan',
         'tainted'     => 'red',
         'escaped'     => 'bright_red',
+        'unknown'     => 'bright_yellow on_blue',
     },
     'class' => {
         inherited    => 'none',   # also 'all', 'public' or 'private'
@@ -82,15 +83,16 @@ my $properties = {
         _depth       => 0,        # used internally
     },
     'filters' => {
-        SCALAR => [ \&SCALAR  ],
-        ARRAY  => [ \&ARRAY   ],
-        HASH   => [ \&HASH    ],
-        REF    => [ \&REF     ],
-        CODE   => [ \&CODE    ],
-        GLOB   => [ \&GLOB    ],
-        VSTRING=> [ \&VSTRING ],
-        Regexp => [ \&Regexp  ],
-        -class => [ \&_class  ],
+        SCALAR  => [ \&SCALAR   ],
+        ARRAY   => [ \&ARRAY    ],
+        HASH    => [ \&HASH     ],
+        REF     => [ \&REF      ],
+        CODE    => [ \&CODE     ],
+        GLOB    => [ \&GLOB     ],
+        VSTRING => [ \&VSTRING  ],
+        Regexp  => [ \&Regexp   ],
+        -unknown=> [ \&_unknown ],
+        -class  => [ \&_class   ],
     },
 
     _output          => *STDERR,     # used internally
@@ -264,9 +266,21 @@ sub _p {
         }
     }
 
-    if (not $found) {
+    if (not $found and Scalar::Util::blessed($item) ) {
         # let '-class' filters have a go
         foreach my $filter ( @{ $p->{filters}->{'-class'} } ) {
+            if ( defined (my $result = $filter->($item, $p)) ) {
+                $string .= $result;
+                $found = 1;
+                last;
+            }
+        }
+    }
+    
+    if ( not $found ) {
+        # if it's not a class and not a known core type, we must be in
+        # a future perl with some type we're unaware of
+        foreach my $filter ( @{ $p->{filters}->{'-unknown'} } ) {
             if ( defined (my $result = $filter->($item, $p)) ) {
                 $string .= $result;
                 last;
@@ -491,7 +505,7 @@ sub HASH {
 
             # length of the largest key is used for indenting
             if ($multiline) {
-                my $l = length colorstrip($colored);
+                my $l = length $colored;
                 $len = $l if $l > $len;
             }
         }
@@ -617,12 +631,21 @@ sub GLOB {
 }
 
 
+sub _unknown {
+    my($item, $p) = @_;
+    my $ref = ref $item;
+    
+    my $string = '';
+    $string = colored($ref, $p->{color}->{'unknown'});
+    return $string;
+}
+
 sub _class {
     my ($item, $p) = @_;
     my $ref = ref $item;
 
     # if the user specified a method to use instead, we do that
-    if ( $p->{class_method} and Scalar::Util::blessed($item) and my $method = $item->can($p->{class_method}) ) {
+    if ( $p->{class_method} and my $method = $item->can($p->{class_method}) ) {
         return $method->($item, $p);
     }
 
@@ -824,11 +847,12 @@ sub _merge {
         foreach my $key (keys %$p) {
             if ($key eq 'color' or $key eq 'colour') {
                 my $color = $p->{$key};
-                if (defined $color and not $color) {
+                if ( not ref $color or ref $color ne 'HASH' ) {
+                    Carp::carp q['color' should be a HASH reference. Did you mean 'colored'?];
                     $clone->{color} = {};
                 }
                 else {
-                    foreach my $target ( keys %{$p->{$key}} ) {
+                    foreach my $target ( keys %$color ) {
                         $clone->{color}->{$target} = $p->{$key}->{$target};
                     }
                 }
@@ -1188,11 +1212,15 @@ Note that both spellings ('color' and 'colour') will work.
         regex       => 'yellow',        # regular expressions
         code        => 'green',         # code references
         glob        => 'bright_cyan',   # globs (usually file handles)
+        vstring     => 'bright_blue',   # version strings (v5.16.0, etc)
         repeated    => 'white on_red',  # references to seen values
         caller_info => 'bright_cyan',   # details on what's being printed
         weak        => 'cyan',          # weak references
         tainted     => 'red',           # tainted content
         escaped     => 'bright_red',    # escaped characters (\t, \n, etc)
+
+        # potential new Perl datatypes, unknown to Data::Printer
+        unknown     => 'bright_yellow on_blue',
      },
    };
 
@@ -1248,6 +1276,7 @@ customization options available, as shown below (with default values):
       show_tied      => 1,       # expose tied variables
       show_tainted   => 1,       # expose tainted variables
       show_weak      => 1,       # expose weak references
+      show_readonly  => 0,       # expose scalar variables marked as read-only
       print_escapes  => 0,       # print non-printable chars as "\n", "\t", etc.
       quote_keys     => 'auto',  # quote hash keys (1 for always, 0 for never).
                                  # 'auto' will quote when key is empty/space-only.
@@ -1949,6 +1978,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 =item * Sebastian Willing (Sewi)
 
 =item * Sergey Aleynikov (randir)
+
+=item * Stanislaw Pusep (syp)
 
 =item * Stephen Thirlwall (sdt)
 
