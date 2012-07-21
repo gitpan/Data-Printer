@@ -13,7 +13,7 @@ use File::HomeDir ();
 use Fcntl;
 use version 0.77 ();
 
-our $VERSION = '0.30_04';
+our $VERSION = '0.30_05';
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -40,6 +40,7 @@ my $properties = {
     'show_tainted'   => 1,
     'show_weak'      => 1,
     'show_readonly'  => 0,
+    'show_lvalue'    => 1,
     #'escape_chars'   => 1, ### <== DEPRECATED!!!
     'print_escapes'  => 0,
     'quote_keys'     => 'auto',
@@ -62,6 +63,8 @@ my $properties = {
         'code'        => 'green',
         'glob'        => 'bright_cyan',
         'vstring'     => 'bright_blue',
+        'lvalue'      => 'bright_white',
+        'format'      => 'bright_cyan',
         'repeated'    => 'white on_red',
         'caller_info' => 'bright_cyan',
         'weak'        => 'cyan',
@@ -83,6 +86,9 @@ my $properties = {
         _depth       => 0,        # used internally
     },
     'filters' => {
+        # The IO ref type isn't supported as you can't actually create one,
+        # any handle you make is automatically blessed into an IO::* object,
+        # and those are separately handled.
         SCALAR  => [ \&SCALAR   ],
         ARRAY   => [ \&ARRAY    ],
         HASH    => [ \&HASH     ],
@@ -90,6 +96,8 @@ my $properties = {
         CODE    => [ \&CODE     ],
         GLOB    => [ \&GLOB     ],
         VSTRING => [ \&VSTRING  ],
+        LVALUE  => [ \&LVALUE ],
+        FORMAT  => [ \&FORMAT ],
         Regexp  => [ \&Regexp   ],
         -unknown=> [ \&_unknown ],
         -class  => [ \&_class   ],
@@ -583,6 +591,21 @@ sub VSTRING {
     return $string;
 }
 
+sub FORMAT {
+    my ($item, $p) = @_;
+    my $string = '';
+    $string .= colored("FORMAT", $p->{color}->{'format'});
+    return $string;
+}
+
+sub LVALUE {
+    my ($item, $p) = @_;
+    my $string = SCALAR( $item, $p );
+    $string .= colored( ' (LVALUE)', $p->{color}{lvalue} )
+        if $p->{show_lvalue};
+
+    return $string;
+}
 
 sub GLOB {
     my ($item, $p) = @_;
@@ -596,7 +619,7 @@ sub GLOB {
     # implement some of these flags (maybe not even
     # fcntl() itself, so we must wrap it.
     my $flags;
-    eval { $flags = fcntl($$item, F_GETFL, 0) };
+    eval { no warnings qw( unopened closed ); $flags = fcntl($$item, F_GETFL, 0) };
     if ($flags) {
         $extra .= ($flags & O_WRONLY) ? 'write-only'
                 : ($flags & O_RDWR)   ? 'read/write'
@@ -609,7 +632,7 @@ sub GLOB {
         # Solaris, for example, doesn't have O_ASYNC :(
         my %flags = ();
         eval { $flags{'append'}      = O_APPEND   };
-        eval { $flags{'async'}       = O_ASYNC    };
+        eval { $flags{'async'}       = O_ASYNC    }; # leont says this is the only one I should care for.
         eval { $flags{'create'}      = O_CREAT    };
         eval { $flags{'truncate'}    = O_TRUNC    };
         eval { $flags{'nonblocking'} = O_NONBLOCK };
@@ -620,7 +643,7 @@ sub GLOB {
         $extra .= ', ';
     }
     my @layers = ();
-    eval { @layers = PerlIO::get_layers $$item };
+    eval { @layers = PerlIO::get_layers $$item }; # TODO: try PerlIO::Layers::get_layers (leont)
     unless ($@) {
         $extra .= "layers: @layers";
     }
@@ -949,7 +972,7 @@ sub _load_rc_file {
     return unless -e $file;
 
     my $mode = (stat $file )[2];
-    if ($mode & 0020 || $mode & 0002) {
+    if ($^O !~ /Win32/i && ($mode & 0020 || $mode & 0002) ) {
         warn "rc file '$file' must NOT be writeable to other users. Skipping.\n";
         return;
     }
@@ -1277,6 +1300,7 @@ customization options available, as shown below (with default values):
       show_tainted   => 1,       # expose tainted variables
       show_weak      => 1,       # expose weak references
       show_readonly  => 0,       # expose scalar variables marked as read-only
+      show_lvalue    => 1,       # expose lvalue types
       print_escapes  => 0,       # print non-printable chars as "\n", "\t", etc.
       quote_keys     => 'auto',  # quote hash keys (1 for always, 0 for never).
                                  # 'auto' will quote when key is empty/space-only.
@@ -1492,7 +1516,7 @@ user id that ran the script using Data::Printer);
 
 =item * The file B<must> be read-only for everyone but your user.
 This usually means permissions C<0644>, C<0640> or C<0600> in
-Unix-like systems;
+Unix-like systems. B<THIS IS NOT CHECKED IN WIN32>;
 
 =item * The file will B<NOT> be loaded in Taint mode, unless
 you specifically load Data::Printer with the 'allow_tainted'

@@ -45,6 +45,7 @@ t/23-caller_info.t
 t/24-no_prototypes.t
 t/25-weak.t
 t/26-tainted.t
+t/26.2-tainted_rc.t
 t/27-pass_through.t
 t/27.2-pass_through.t
 t/27.3-pass_through-DDP.t
@@ -55,12 +56,14 @@ t/30-escape_chars.t
 t/30.2-print_escapes.t
 t/31-bad_parameters.t
 t/32-quote_keys.t
+t/33-begin.t
 t/33-end_separator.t
 t/33-separator.t
 t/34-show_readonly.t
-t/34-vstrings.t
 t/35-vstrings.t
 t/36-valign.t
+t/37-format.t
+t/38-lvalue.t
 t/pod-coverage.t
 t/pod.t
 META.yml                                 Module YAML meta-data (added by MakeMaker)
