@@ -13,7 +13,7 @@ use File::HomeDir ();
 use Fcntl;
 use version 0.77 ();
 
-our $VERSION = '0.34';
+our $VERSION = '0.35';
 
 BEGIN {
     if ($^O =~ /Win32/i) {
@@ -346,23 +346,22 @@ sub _escape_chars {
     my $esc_color = color( $p->{color}{escaped} );
 
     if ($p->{print_escapes}) {
+        $str =~ s/\e/$esc_color\\e$orig_color/g;
+
         my %escaped = (
-            "\n" => $esc_color . '\n' . $orig_color,
-            "\r" => $esc_color . '\r' . $orig_color,
-            "\t" => $esc_color . '\t' . $orig_color,
-            "\f" => $esc_color . '\f' . $orig_color,
-            "\b" => $esc_color . '\b' . $orig_color,
-            "\a" => $esc_color . '\a' . $orig_color,
-            "\e" => $esc_color . '\e' . $orig_color,
+            "\n" => '\n',
+            "\r" => '\r',
+            "\t" => '\t',
+            "\f" => '\f',
+            "\b" => '\b',
+            "\a" => '\a',
         );
         foreach my $k ( keys %escaped ) {
-            my $esc = $escaped{$k};
-            $str =~ s/$k/$esc/g;
+            $str =~ s/$k/$esc_color$escaped{$k}$orig_color/g;
         }
     }
     # always escape the null character
-    my $null = $esc_color . '\0' . $orig_color;
-    $str =~ s/\0/$null/g;
+    $str =~ s/\0/$esc_color\\0$orig_color/g;
 
     return $str;
 }
@@ -1988,6 +1987,8 @@ with patches, bug reports, wishlists, comments and tests. They are
 =over 4
 
 =item * Allan Whiteford
+
+=item * Andreas König
 
 =item * Andy Bach
 
