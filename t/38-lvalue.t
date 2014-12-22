@@ -7,9 +7,9 @@ BEGIN {
     use File::HomeDir::Test;  # avoid user's .dataprinter
 
     use Test::More;
-    use Data::Printer;
-
 }
+
+use Data::Printer return_value => 'dump';
 
 my $scalar = \substr( "abc", 2);
 my $test_name = "LVALUE refs";

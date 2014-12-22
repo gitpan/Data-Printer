@@ -31,8 +31,19 @@ BEGIN {
     # file created and in place, let's load up our
     # module and see if it overrides the default conf
     # with our .dataprinter RC file
-    use_ok ('Data::Printer');
+    use_ok ('Data::Printer', return_value => 'dump');
     unlink $file or fail('error removing test file');
+
+    # let's see if we can call p() from within the BEGIN block itself.
+    # prototypes aren't available in here :(
+    my $h = { a => 42 };
+    is( p($h), color('reset') . "{$/    "
+                . colored('a', 'red')
+                . '  +  '
+                . colored('42', 'bright_blue')
+                . "$/}"
+    , 'hash keys are now red'
+    );
 };
 
 my %hash = ( key => 'value' );

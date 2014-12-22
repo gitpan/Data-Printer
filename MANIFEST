@@ -11,6 +11,7 @@ MANIFEST			This list of files
 MANIFEST.SKIP
 README
 t/00-load.t
+t/00.2-begin_load.t
 t/01-p.t
 t/02-colors.t
 t/02.2-autocolor.t
@@ -45,6 +46,7 @@ t/23-caller_info.t
 t/24-no_prototypes.t
 t/25-weak.t
 t/26-tainted.t
+t/26.2-tainted_rc.t
 t/27-pass_through.t
 t/27.2-pass_through.t
 t/27.3-pass_through-DDP.t
@@ -62,7 +64,13 @@ t/36-valign.t
 t/37-format.t
 t/38-lvalue.t
 t/39-seen_override.t
-t/pod-coverage.t
-t/pod.t
+t/40-escape_chars.t
+t/41-yaml.t
+t/42-alignment.t
+t/43-_is_number.t
+t/44-number-colors.t
+t/45-np.t
+xt/pod-coverage.t
+xt/pod.t
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)

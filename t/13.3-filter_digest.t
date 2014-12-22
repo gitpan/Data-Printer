@@ -9,6 +9,7 @@ BEGIN {
 };
 
 use Data::Printer {
+    return_value => 'dump',
     filters => {
        -external => [ 'Digest' ],
        HASH => sub { 'this is a hash' }
@@ -19,7 +20,7 @@ my $data = 'I can has Digest?';
 
 foreach my $module (qw( Digest::Adler32 Digest::MD2 Digest::MD4 Digest::MD5
                         Digest::SHA Digest::SHA1 
-                        Digest::Whirlpool Digest::Haval256
+                        Digest::Whirlpool
 )) {
 
     SKIP: {
@@ -27,6 +28,9 @@ foreach my $module (qw( Digest::Adler32 Digest::MD2 Digest::MD4 Digest::MD5
         skip "$module not available", 1 if $@;
 
         my $digest = $module->new;
+        skip "$module is not a Digest::base subclass", 1
+            unless $digest->isa('Digest::base');
+
         $digest->add( $data );
 
         my $dump = p $digest;
